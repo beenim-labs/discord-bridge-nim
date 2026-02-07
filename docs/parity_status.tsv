@@ -1,0 +1,24 @@
+main.go	Partial
+formatter.go	Partial
+formatter_tag.go	Implemented
+formatter_everyone.go	Implemented
+formatter_test.go	Implemented
+config/config.go	Partial
+config/bridge.go	Partial
+database/database.go	Implemented (bootstrap)
+database/json.go	Implemented
+database/user.go	Implemented (SQLite)
+database/portal.go	Implemented (SQLite)
+database/guild.go	Implemented (SQLite)
+database/puppet.go	Implemented (SQLite)
+database/thread.go	Implemented (SQLite)
+database/message.go	Implemented (SQLite)
+database/reaction.go	Implemented (SQLite)
+database/role.go	Implemented (SQLite)
+database/file.go	Implemented (SQLite)
+database/userportal.go	Implemented (SQLite)
+directmedia_id.go	Implemented
+provisioning.go	Partial
+remoteauth/client.go	Implemented (packet/state core)
+remoteauth/user.go	Implemented
+directmedia.go	Partial

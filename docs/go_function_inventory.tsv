@@ -1,0 +1,538 @@
+file	line	signature
+main.go	84	func (br *DiscordBridge) GetExampleConfig() string {
+main.go	88	func (br *DiscordBridge) GetConfigPtr() interface{} {
+main.go	96	func (br *DiscordBridge) Init() {
+main.go	107	func (br *DiscordBridge) Start() {
+main.go	119	func (br *DiscordBridge) Stop() {
+main.go	130	func (br *DiscordBridge) GetIPortal(mxid id.RoomID) bridge.Portal {
+main.go	138	func (br *DiscordBridge) GetIUser(mxid id.UserID, create bool) bridge.User {
+main.go	146	func (br *DiscordBridge) IsGhost(mxid id.UserID) bool {
+main.go	151	func (br *DiscordBridge) GetIGhost(mxid id.UserID) bridge.Ghost {
+main.go	159	func (br *DiscordBridge) CreatePrivatePortal(id id.RoomID, user bridge.User, ghost bridge.Ghost) {
+main.go	163	func main() {
+formatter_everyone.go	39	func (n *astDiscordEveryone) Dump(source []byte, level int) {
+formatter_everyone.go	43	func (n *astDiscordEveryone) Kind() ast.NodeKind {
+formatter_everyone.go	47	func (n *astDiscordEveryone) String() string {
+formatter_everyone.go	59	func (s *discordEveryoneParser) Trigger() []byte {
+formatter_everyone.go	63	func (s *discordEveryoneParser) Parse(parent ast.Node, block text.Reader, pc parser.Context) ast.Node {
+formatter_everyone.go	75	func (s *discordEveryoneParser) CloseBlock(parent ast.Node, pc parser.Context) {
+formatter_everyone.go	81	func (r *discordEveryoneHTMLRenderer) RegisterFuncs(reg renderer.NodeRendererFuncRegisterer) {
+formatter_everyone.go	85	func (r *discordEveryoneHTMLRenderer) renderDiscordEveryone(w util.BufWriter, source []byte, n ast.Node, entering bool) (status ast.WalkStatus, err error) {
+formatter_everyone.go	103	func (e *discordEveryone) Extend(m goldmark.Markdown) {
+formatter_test.go	25	func TestEscapeDiscordMarkdown(t *testing.T) {
+provisioning.go	50	func newProvisioningAPI(br *DiscordBridge) *ProvisioningAPI {
+provisioning.go	85	func jsonResponse(w http.ResponseWriter, status int, response interface{}) {
+provisioning.go	111	func (rw *responseWrap) WriteHeader(statusCode int) {
+provisioning.go	116	func (rw *responseWrap) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+provisioning.go	125	func (p *ProvisioningAPI) authMiddleware(h http.Handler) http.Handler {
+provisioning.go	174	func (p *ProvisioningAPI) disconnect(w http.ResponseWriter, r *http.Request) {
+provisioning.go	213	func (p *ProvisioningAPI) ping(w http.ResponseWriter, r *http.Request) {
+provisioning.go	230	func (p *ProvisioningAPI) logout(w http.ResponseWriter, r *http.Request) {
+provisioning.go	242	func (p *ProvisioningAPI) qrLogin(w http.ResponseWriter, r *http.Request) {
+provisioning.go	376	func (p *ProvisioningAPI) tokenLogin(w http.ResponseWriter, r *http.Request) {
+provisioning.go	413	func (p *ProvisioningAPI) reconnect(w http.ResponseWriter, r *http.Request) {
+provisioning.go	451	func (p *ProvisioningAPI) guildsList(w http.ResponseWriter, r *http.Request) {
+provisioning.go	483	func (p *ProvisioningAPI) guildsBridge(w http.ResponseWriter, r *http.Request) {
+provisioning.go	525	func (p *ProvisioningAPI) guildsUnbridge(w http.ResponseWriter, r *http.Request) {
+commands.go	53	func (br *DiscordBridge) RegisterCommands() {
+commands.go	76	func wrapCommand(handler func(*WrappedCommandEvent)) func(*commands.Event) {
+commands.go	100	func decodeToken(token string) (userID int64, err error) {
+commands.go	130	func fnLoginToken(ce *WrappedCommandEvent) {
+commands.go	176	func fnLoginQR(ce *WrappedCommandEvent) {
+commands.go	235	func sendQRCode(ce *WrappedCommandEvent, code string) id.EventID {
+commands.go	257	func uploadQRCode(ce *WrappedCommandEvent, code string) (id.ContentURI, bool) {
+commands.go	284	func fnLogout(ce *WrappedCommandEvent) {
+commands.go	303	func fnPing(ce *WrappedCommandEvent) {
+commands.go	327	func fnDisconnect(ce *WrappedCommandEvent) {
+commands.go	348	func fnReconnect(ce *WrappedCommandEvent) {
+commands.go	369	func fnRejoinSpace(ce *WrappedCommandEvent) {
+commands.go	407	func fnSetRelay(ce *WrappedCommandEvent) {
+commands.go	524	func fnUnsetRelay(ce *WrappedCommandEvent) {
+commands.go	567	func fnGuilds(ce *WrappedCommandEvent) {
+commands.go	590	func fnListGuilds(ce *WrappedCommandEvent) {
+commands.go	610	func fnBridgeGuild(ce *WrappedCommandEvent) {
+commands.go	620	func fnUnbridgeGuild(ce *WrappedCommandEvent) {
+commands.go	636	func fnGuildBridgingMode(ce *WrappedCommandEvent) {
+commands.go	671	func isNumber(str string) bool {
+commands.go	680	func fnBridge(ce *WrappedCommandEvent) {
+commands.go	801	func fnCreatePortal(ce *WrappedCommandEvent) {
+commands.go	840	func fnUnbridge(ce *WrappedCommandEvent) {
+commands.go	858	func fnDeleteAllPortals(ce *WrappedCommandEvent) {
+attachments.go	32	func downloadDiscordAttachment(cli *http.Client, url string, maxSize int64) ([]byte, error) {
+attachments.go	68	func uploadDiscordAttachment(cli *http.Client, url string, data []byte) error {
+attachments.go	94	func downloadMatrixAttachment(intent *appservice.IntentAPI, content *event.MessageEventContent) ([]byte, error) {
+attachments.go	123	func (br *DiscordBridge) uploadMatrixAttachment(intent *appservice.IntentAPI, data []byte, url string, encrypt bool, meta AttachmentMeta, semaWg *sync.WaitGroup) (*database.File, error) {
+attachments.go	193	func (br *DiscordBridge) convertLottie(data []byte) ([]byte, string, error) {
+attachments.go	271	func (br *DiscordBridge) copyAttachmentToMatrix(intent *appservice.IntentAPI, url string, encrypt bool, meta AttachmentMeta) (returnDBFile *database.File, returnErr error) {
+attachments.go	330	func (portal *Portal) getEmojiMXCByDiscordID(emojiID, name string, animated bool) id.ContentURI {
+commands_botinteraction.go	59	func (portal *Portal) getCommand(user *User, command string) (*discordgo.ApplicationCommand, error) {
+commands_botinteraction.go	82	func getCommandOptionTypeName(optType discordgo.ApplicationCommandOptionType) string {
+commands_botinteraction.go	111	func parseCommandOptionValue(optType discordgo.ApplicationCommandOptionType, value string) (any, error) {
+commands_botinteraction.go	138	func indent(text, with string) string {
+commands_botinteraction.go	146	func formatOption(opt *discordgo.ApplicationCommandOption) string {
+commands_botinteraction.go	164	func formatCommand(cmd *discordgo.ApplicationCommand) string {
+commands_botinteraction.go	182	func parseCommandOptions(opts []*discordgo.ApplicationCommandOption, subcommands []string, namedArgs map[string]string) (res []*discordgo.ApplicationCommandOptionInput, err error) {
+commands_botinteraction.go	228	func executeCommand(cmd *discordgo.ApplicationCommand, args []string) (res []*discordgo.ApplicationCommandOptionInput, err error) {
+commands_botinteraction.go	243	func fnCommands(ce *WrappedCommandEvent) {
+commands_botinteraction.go	277	func fnExec(ce *WrappedCommandEvent) {
+formatter_tag.go	47	func (n *astDiscordTag) Dump(source []byte, level int) {
+formatter_tag.go	51	func (n *astDiscordTag) Kind() ast.NodeKind {
+formatter_tag.go	60	func (n *astDiscordUserMention) String() string {
+formatter_tag.go	71	func (n *astDiscordRoleMention) String() string {
+formatter_tag.go	82	func (n *astDiscordChannelMention) String() string {
+formatter_tag.go	91	func (dts discordTimestampStyle) Format() string {
+formatter_tag.go	117	func (n *astDiscordTimestamp) String() string {
+formatter_tag.go	130	func (n *astDiscordCustomEmoji) String() string {
+formatter_tag.go	143	func (s *discordTagParser) Trigger() []byte {
+formatter_tag.go	149	func (s *discordTagParser) Parse(parent ast.Node, block text.Reader, pc parser.Context) ast.Node {
+formatter_tag.go	202	func (s *discordTagParser) CloseBlock(parent ast.Node, pc parser.Context) {
+formatter_tag.go	210	func (r *discordTagHTMLRenderer) RegisterFuncs(reg renderer.NodeRendererFuncRegisterer) {
+formatter_tag.go	214	func relativeTimeFormat(ts time.Time) string {
+formatter_tag.go	259	func (r *discordTagHTMLRenderer) renderDiscordMention(w util.BufWriter, source []byte, n ast.Node, entering bool) (status ast.WalkStatus, err error) {
+formatter_tag.go	336	func (e *discordTag) Extend(m goldmark.Markdown) {
+directmedia_id.go	56	func ParseMediaID(id string, key [32]byte) (*MediaID, error) {
+directmedia_id.go	78	func (mid *MediaID) SignedString(key [32]byte) string {
+directmedia_id.go	87	func (mid *MediaID) Write(to io.Writer) {
+directmedia_id.go	94	func (mid *MediaID) Size() int {
+directmedia_id.go	104	func (mid *MediaID) Read(from io.Reader) error {
+directmedia_id.go	144	func (amd *AttachmentMediaData) Write(to io.Writer) {
+directmedia_id.go	148	func (amd *AttachmentMediaData) Read(from io.Reader) (err error) {
+directmedia_id.go	152	func (amd *AttachmentMediaData) Size() int {
+directmedia_id.go	156	func (amd *AttachmentMediaData) Wrap() *MediaID {
+directmedia_id.go	164	func (amd *AttachmentMediaData) CacheKey() AttachmentCacheKey {
+directmedia_id.go	176	func (smd *StickerMediaData) Write(to io.Writer) {
+directmedia_id.go	180	func (smd *StickerMediaData) Read(from io.Reader) error {
+directmedia_id.go	184	func (smd *StickerMediaData) Size() int {
+directmedia_id.go	188	func (smd *StickerMediaData) Wrap() *MediaID {
+directmedia_id.go	206	func (emd *EmojiMediaData) Write(to io.Writer) {
+directmedia_id.go	211	func (emd *EmojiMediaData) Read(from io.Reader) (err error) {
+directmedia_id.go	224	func (emd *EmojiMediaData) Size() int {
+directmedia_id.go	228	func (emd *EmojiMediaData) Wrap() *MediaID {
+directmedia_id.go	242	func (uamd *UserAvatarMediaData) Write(to io.Writer) {
+directmedia_id.go	246	func (uamd *UserAvatarMediaData) Read(from io.Reader) error {
+directmedia_id.go	250	func (uamd *UserAvatarMediaData) Size() int {
+directmedia_id.go	254	func (uamd *UserAvatarMediaData) Wrap() *MediaID {
+directmedia_id.go	269	func (guamd *GuildMemberAvatarMediaData) Write(to io.Writer) {
+directmedia_id.go	273	func (guamd *GuildMemberAvatarMediaData) Read(from io.Reader) error {
+directmedia_id.go	277	func (guamd *GuildMemberAvatarMediaData) Size() int {
+directmedia_id.go	281	func (guamd *GuildMemberAvatarMediaData) Wrap() *MediaID {
+guildportal.go	46	func (br *DiscordBridge) loadGuild(dbGuild *database.Guild, id string, createIfNotExist bool) *Guild {
+guildportal.go	67	func (br *DiscordBridge) GetGuildByMXID(mxid id.RoomID) *Guild {
+guildportal.go	79	func (br *DiscordBridge) GetGuildByID(id string, createIfNotExist bool) *Guild {
+guildportal.go	91	func (br *DiscordBridge) GetAllGuilds() []*Guild {
+guildportal.go	95	func (br *DiscordBridge) dbGuildsToGuilds(dbGuilds []*database.Guild) []*Guild {
+guildportal.go	116	func (br *DiscordBridge) NewGuild(dbGuild *database.Guild) *Guild {
+guildportal.go	126	func (guild *Guild) getBridgeInfo() (string, event.BridgeEventContent) {
+guildportal.go	146	func (guild *Guild) UpdateBridgeInfo() {
+guildportal.go	164	func (guild *Guild) CreateMatrixRoom(user *User, meta *discordgo.Guild) error {
+guildportal.go	229	func (guild *Guild) UpdateInfo(source *User, meta *discordgo.Guild) *discordgo.Guild {
+guildportal.go	245	func (guild *Guild) UpdateName(meta *discordgo.Guild) bool {
+guildportal.go	267	func (guild *Guild) UpdateAvatar(iconID string) bool {
+guildportal.go	297	func (guild *Guild) cleanup() {
+guildportal.go	312	func (guild *Guild) RemoveMXID() {
+guildportal.go	326	func (guild *Guild) Delete() {
+portal_convert.go	49	func (portal *Portal) createMediaFailedMessage(bridgeErr error) *event.MessageEventContent {
+portal_convert.go	58	func (portal *Portal) convertDiscordFile(ctx context.Context, typeName string, intent *appservice.IntentAPI, id, url string, content *event.MessageEventContent) *event.MessageEventContent {
+portal_convert.go	87	func (portal *Portal) cleanupConvertedStickerInfo(content *event.MessageEventContent) {
+portal_convert.go	108	func (portal *Portal) convertDiscordSticker(ctx context.Context, intent *appservice.IntentAPI, sticker *discordgo.StickerItem) *ConvertedMessage {
+portal_convert.go	147	func (portal *Portal) convertDiscordAttachment(ctx context.Context, intent *appservice.IntentAPI, messageID string, att *discordgo.MessageAttachment) *ConvertedMessage {
+portal_convert.go	202	func (portal *Portal) convertDiscordVideoEmbed(ctx context.Context, intent *appservice.IntentAPI, embed *discordgo.MessageEmbed) *ConvertedMessage {
+portal_convert.go	277	func (portal *Portal) convertDiscordMessage(ctx context.Context, puppet *Puppet, intent *appservice.IntentAPI, msg *discordgo.Message) []*ConvertedMessage {
+portal_convert.go	341	func (puppet *Puppet) addMemberMeta(part *ConvertedMessage, msg *discordgo.Message) {
+portal_convert.go	381	func (puppet *Puppet) addWebhookMeta(part *ConvertedMessage, msg *discordgo.Message) {
+portal_convert.go	444	func (portal *Portal) convertDiscordRichEmbed(ctx context.Context, intent *appservice.IntentAPI, embed *discordgo.MessageEmbed, msgID string, index int) string {
+portal_convert.go	562	func (portal *Portal) convertDiscordLinkEmbedImage(ctx context.Context, intent *appservice.IntentAPI, url string, width, height int, preview *BeeperLinkPreview) {
+portal_convert.go	587	func (portal *Portal) convertDiscordLinkEmbedToBeeper(ctx context.Context, intent *appservice.IntentAPI, embed *discordgo.MessageEmbed) *BeeperLinkPreview {
+portal_convert.go	615	func isActuallyLinkPreview(embed *discordgo.MessageEmbed) bool {
+portal_convert.go	621	func getEmbedType(msg *discordgo.Message, embed *discordgo.MessageEmbed) BridgeEmbedType {
+portal_convert.go	646	func isPlainGifMessage(msg *discordgo.Message) bool {
+portal_convert.go	657	func (portal *Portal) convertDiscordMentions(msg *discordgo.Message, syncGhosts bool) *event.Mentions {
+portal_convert.go	685	func (portal *Portal) convertDiscordTextMessage(ctx context.Context, intent *appservice.IntentAPI, msg *discordgo.Message) *ConvertedMessage {
+backfill.go	19	func (portal *Portal) forwardBackfillInitial(source *User, thread *Thread) {
+backfill.go	54	func (portal *Portal) ForwardBackfillMissed(source *User, serverLastMessageID string, thread *Thread) {
+backfill.go	110	func (portal *Portal) collectBackfillMessages(log zerolog.Logger, source *User, limit int, until string, thread *Thread) ([]*discordgo.Message, bool, error) {
+backfill.go	151	func (portal *Portal) backfillLimited(log zerolog.Logger, source *User, limit int, after string, thread *Thread) {
+backfill.go	179	func (portal *Portal) backfillUnlimitedMissed(log zerolog.Logger, source *User, after string, thread *Thread) {
+backfill.go	205	func (portal *Portal) sendBackfillBatch(log zerolog.Logger, source *User, messages []*discordgo.Message, thread *Thread) {
+backfill.go	217	func (portal *Portal) forwardBatchSend(log zerolog.Logger, source *User, messages []*discordgo.Message, thread *Thread) {
+backfill.go	243	func (portal *Portal) convertMessageBatch(log zerolog.Logger, source *User, messages []*discordgo.Message, thread *Thread) ([]*event.Event, []*discordgo.Message, []database.Message) {
+backfill.go	339	func (portal *Portal) deterministicEventID(messageID, partName string) id.EventID {
+backfill.go	350	func compareMessageIDs(id1, id2 string) int {
+backfill.go	365	func shouldBackfill(latestBridgedIDStr, latestIDFromServerStr string) bool {
+backfill.go	373	func (a MessageSlice) Len() int {
+backfill.go	377	func (a MessageSlice) Swap(i, j int) {
+backfill.go	381	func (a MessageSlice) Less(i, j int) bool {
+puppet.go	37	func (puppet *Puppet) GetMXID() id.UserID {
+puppet.go	43	func (br *DiscordBridge) NewPuppet(dbPuppet *database.Puppet) *Puppet {
+puppet.go	53	func (br *DiscordBridge) ParsePuppetMXID(mxid id.UserID) (string, bool) {
+puppet.go	72	func (br *DiscordBridge) GetPuppetByMXID(mxid id.UserID) *Puppet {
+puppet.go	81	func (br *DiscordBridge) GetPuppetByID(id string) *Puppet {
+puppet.go	101	func (br *DiscordBridge) GetPuppetByCustomMXID(mxid id.UserID) *Puppet {
+puppet.go	120	func (br *DiscordBridge) GetAllPuppetsWithCustomMXID() []*Puppet {
+puppet.go	124	func (br *DiscordBridge) GetAllPuppets() []*Puppet {
+puppet.go	128	func (br *DiscordBridge) dbPuppetsToPuppets(dbPuppets []*database.Puppet) []*Puppet {
+puppet.go	154	func (br *DiscordBridge) FormatPuppetMXID(did string) id.UserID {
+puppet.go	161	func (puppet *Puppet) GetDisplayname() string {
+puppet.go	165	func (puppet *Puppet) GetAvatarURL() id.ContentURI {
+puppet.go	169	func (puppet *Puppet) DefaultIntent() *appservice.IntentAPI {
+puppet.go	173	func (puppet *Puppet) IntentFor(portal *Portal) *appservice.IntentAPI {
+puppet.go	181	func (puppet *Puppet) CustomIntent() *appservice.IntentAPI {
+puppet.go	188	func (puppet *Puppet) updatePortalMeta(meta func(portal *Portal)) {
+puppet.go	197	func (puppet *Puppet) UpdateName(info *discordgo.User) bool {
+puppet.go	219	func (br *DiscordBridge) reuploadUserAvatar(intent *appservice.IntentAPI, guildID, userID, avatarID string) (id.ContentURI, string, error) {
+puppet.go	247	func (puppet *Puppet) UpdateAvatar(info *discordgo.User) bool {
+puppet.go	284	func (puppet *Puppet) UpdateInfo(source *User, info *discordgo.User, message *discordgo.Message) {
+puppet.go	334	func (puppet *Puppet) UpdateContactInfo(info *discordgo.User) bool {
+puppet.go	360	func (puppet *Puppet) ResendContactInfo() {
+remoteauth/clientpackets.go	20	func (h *clientHeartbeat) send(client *Client) error {
+remoteauth/clientpackets.go	40	func (i *clientInit) send(client *Client) error {
+remoteauth/clientpackets.go	63	func (n *clientNonceProof) send(client *Client) error {
+remoteauth/serverpackets.go	19	func (c *Client) processMessages() {
+remoteauth/serverpackets.go	101	func (h *serverHello) process(client *Client) error {
+remoteauth/serverpackets.go	146	func (n *serverNonceProof) process(client *Client) error {
+remoteauth/serverpackets.go	167	func (h *serverHeartbeatAck) process(client *Client) error {
+remoteauth/serverpackets.go	180	func (p *serverPendingRemoteInit) process(client *Client) error {
+remoteauth/serverpackets.go	196	func (p *serverPendingTicket) process(client *Client) error {
+remoteauth/serverpackets.go	212	func (p *serverPendingLogin) process(client *Client) error {
+remoteauth/serverpackets.go	239	func (c *serverCancel) process(client *Client) error {
+remoteauth/client.go	39	func New() (*Client, error) {
+remoteauth/client.go	53	func (c *Client) Dial(ctx context.Context, qrChan chan string, doneChan chan struct{}) error {
+remoteauth/client.go	77	func (c *Client) Result() (User, error) {
+remoteauth/client.go	84	func (c *Client) close() error {
+remoteauth/client.go	104	func (c *Client) write(p clientPacket) error {
+remoteauth/client.go	116	func (c *Client) decrypt(payload string) ([]byte, error) {
+remoteauth/user.go	17	func (u *User) update(payload string) error {
+discord.go	9	func (user *User) channelIsBridgeable(channel *discordgo.Channel) bool {
+config/bridge.go	117	func (bc *BridgeConfig) GetResendBridgeInfo() bool {
+config/bridge.go	121	func (bc *BridgeConfig) EnableMessageStatusEvents() bool {
+config/bridge.go	125	func (bc *BridgeConfig) EnableMessageErrorNotices() bool {
+config/bridge.go	129	func boolToInt(val bool) int {
+config/bridge.go	136	func (bc *BridgeConfig) Validate() error {
+config/bridge.go	149	func (bc *BridgeConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
+config/bridge.go	179	func (bc BridgeConfig) GetDoublePuppetConfig() bridgeconfig.DoublePuppetConfig {
+config/bridge.go	183	func (bc BridgeConfig) GetEncryptionConfig() bridgeconfig.EncryptionConfig {
+config/bridge.go	187	func (bc BridgeConfig) GetCommandPrefix() string {
+config/bridge.go	191	func (bc BridgeConfig) GetManagementRoomTexts() bridgeconfig.ManagementRoomTexts {
+config/bridge.go	195	func (bc BridgeConfig) FormatUsername(userID string) string {
+config/bridge.go	207	func (bc BridgeConfig) FormatDisplayname(user *discordgo.User, webhook, application bool) string {
+config/bridge.go	225	func (bc BridgeConfig) FormatChannelName(params ChannelNameParams) string {
+config/bridge.go	235	func (bc BridgeConfig) FormatGuildName(params GuildNameParams) string {
+config/upgrade.go	26	func DoUpgrade(helper *up.Helper) {
+config/config.go	30	func (config *Config) CanAutoDoublePuppet(userID id.UserID) bool {
+custompuppet.go	7	func (puppet *Puppet) SwitchCustomMXID(accessToken string, mxid id.UserID) error {
+custompuppet.go	19	func (puppet *Puppet) ClearCustomMXID() {
+custompuppet.go	35	func (puppet *Puppet) StartCustomMXID(reloginOnFail bool) error {
+custompuppet.go	53	func (user *User) tryAutomaticDoublePuppeting() {
+user.go	73	func (user *User) GetRemoteID() string {
+user.go	77	func (user *User) GetRemoteName() string {
+user.go	89	func discordToZeroLevel(level int) zerolog.Level {
+user.go	104	func init() {
+user.go	110	func (user *User) GetPermissionLevel() bridgeconfig.PermissionLevel {
+user.go	114	func (user *User) GetManagementRoomID() id.RoomID {
+user.go	118	func (user *User) GetMXID() id.UserID {
+user.go	122	func (user *User) GetCommandState() map[string]interface{} {
+user.go	126	func (user *User) GetIDoublePuppet() bridge.DoublePuppet {
+user.go	134	func (user *User) GetIGhost() bridge.Ghost {
+user.go	147	func (br *DiscordBridge) loadUser(dbUser *database.User, mxid *id.UserID) *User {
+user.go	170	func (br *DiscordBridge) GetUserByMXID(userID id.UserID) *User {
+user.go	184	func (br *DiscordBridge) GetUserByID(id string) *User {
+user.go	195	func (br *DiscordBridge) GetCachedUserByID(id string) *User {
+user.go	201	func (br *DiscordBridge) GetCachedUserByMXID(userID id.UserID) *User {
+user.go	207	func (br *DiscordBridge) NewUser(dbUser *database.User) *User {
+user.go	225	func (br *DiscordBridge) getAllUsersWithToken() []*User {
+user.go	242	func (br *DiscordBridge) startUsers() {
+user.go	265	func (user *User) startupTryConnect(retryCount int) {
+user.go	285	func (user *User) SetManagementRoom(roomID id.RoomID) {
+user.go	300	func (user *User) getSpaceRoom(ptr *id.RoomID, name, topic string, parent id.RoomID) id.RoomID {
+user.go	373	func (user *User) GetSpaceRoom() id.RoomID {
+user.go	377	func (user *User) GetDMSpaceRoom() id.RoomID {
+user.go	381	func (user *User) ViewingChannel(portal *Portal) bool {
+user.go	402	func (user *User) mutePortal(intent *appservice.IntentAPI, portal *Portal, unmute bool) {
+user.go	423	func (user *User) syncChatDoublePuppetDetails(portal *Portal, justCreated bool) {
+user.go	435	func (user *User) NextDiscordUploadID() string {
+user.go	440	func (user *User) Login(token string) error {
+user.go	472	func (user *User) IsLoggedIn() bool {
+user.go	479	func (user *User) Logout(isOverwriting bool) {
+user.go	514	func (user *User) Connected() bool {
+user.go	539	func (user *User) Connect() error {
+user.go	615	func (user *User) eventHandlerSync(rawEvt any) {
+user.go	619	func (user *User) eventHandler(rawEvt any) {
+user.go	695	func (user *User) Disconnect() error {
+user.go	710	func (user *User) getGuildBridgingMode(guildID string) database.GuildBridgingMode {
+user.go	723	func (s ChannelSlice) Len() int {
+user.go	727	func (s ChannelSlice) Less(i, j int) bool {
+user.go	734	func (s ChannelSlice) Swap(i, j int) {
+user.go	738	func (user *User) readyHandler(r *discordgo.Ready) {
+user.go	798	func (user *User) subscribeGuilds(delay time.Duration) {
+user.go	821	func (user *User) resumeHandler(_ *discordgo.Resumed) {
+user.go	827	func (user *User) addPrivateChannelToSpace(portal *Portal) bool {
+user.go	844	func (user *User) relationshipAddHandler(r *discordgo.RelationshipAdd) {
+user.go	850	func (user *User) relationshipUpdateHandler(r *discordgo.RelationshipUpdate) {
+user.go	856	func (user *User) relationshipRemoveHandler(r *discordgo.RelationshipRemove) {
+user.go	862	func (user *User) handleRelationshipChange(userID, nickname string) {
+user.go	893	func (user *User) handlePrivateChannel(portal *Portal, meta *discordgo.Channel, timestamp time.Time, create, isInSpace bool) {
+user.go	913	func (user *User) addGuildToSpace(guild *Guild, isInSpace bool, timestamp time.Time) bool {
+user.go	935	func (user *User) discordRoleToDB(guildID string, role *discordgo.Role, dbRole *database.Role, txn dbutil.Execable) bool {
+user.go	959	func (user *User) handleGuildRoles(guildID string, newRoles []*discordgo.Role) {
+user.go	988	func (user *User) handleGuild(meta *discordgo.Guild, timestamp time.Time, isInSpace bool) {
+user.go	1019	func (user *User) connectedHandler(_ *discordgo.Connect) {
+user.go	1028	func (user *User) disconnectedHandler(_ *discordgo.Disconnect) {
+user.go	1040	func (user *User) invalidAuthHandler(_ *discordgo.InvalidAuth) {
+user.go	1049	func (user *User) handlePossible40002(err error) bool {
+user.go	1058	func (user *User) guildCreateHandler(g *discordgo.GuildCreate) {
+user.go	1067	func (user *User) guildDeleteHandler(g *discordgo.GuildDelete) {
+user.go	1087	func (user *User) guildUpdateHandler(g *discordgo.GuildUpdate) {
+user.go	1092	func (user *User) threadListSyncHandler(t *discordgo.ThreadListSync) {
+user.go	1116	func (user *User) channelCreateHandler(c *discordgo.ChannelCreate) {
+user.go	1146	func (user *User) channelDeleteHandler(c *discordgo.ChannelDelete) {
+user.go	1167	func (user *User) channelUpdateHandler(c *discordgo.ChannelUpdate) {
+user.go	1176	func (user *User) channelRecipientAdd(c *discordgo.ChannelRecipientAdd) {
+user.go	1183	func (user *User) channelRecipientRemove(c *discordgo.ChannelRecipientRemove) {
+user.go	1190	func (user *User) findPortal(channelID string) (*Portal, *Thread) {
+user.go	1228	func (user *User) pushPortalMessage(msg interface{}, typeName, channelID, guildID string) {
+user.go	1275	func (user *User) makeReadMarkerContent(eventID id.EventID) *CustomReadMarkers {
+user.go	1288	func (user *User) messageAckHandler(m *discordgo.MessageAck) {
+user.go	1321	func (user *User) typingStartHandler(t *discordgo.TypingStart) {
+user.go	1336	func (user *User) interactionSuccessHandler(s *discordgo.InteractionSuccess) {
+user.go	1349	func (user *User) ensureInvited(intent *appservice.IntentAPI, roomID id.RoomID, isDirect, ignoreCache bool) bool {
+user.go	1399	func (user *User) getDirectChats() map[id.UserID][]id.RoomID {
+user.go	1414	func (user *User) updateDirectChats(chats map[id.UserID][]id.RoomID) {
+user.go	1473	func (user *User) bridgeGuild(guildID string, everything bool) error {
+user.go	1518	func (user *User) unbridgeGuild(guildID string) error {
+formatter.go	43	func escapeReplacement(s string) string {
+formatter.go	55	func (b *indentableParagraphParser) CanAcceptIndentedLine() bool {
+formatter.go	77	func (portal *Portal) renderDiscordMarkdownOnlyHTMLNoUnwrap(text string, allowInlineLinks bool) string {
+formatter.go	94	func (portal *Portal) renderDiscordMarkdownOnlyHTML(text string, allowInlineLinks bool) string {
+formatter.go	103	func appendIfNotContains(arr []string, newItem string) []string {
+formatter.go	112	func (br *DiscordBridge) pillConverter(displayname, mxid, eventID string, ctx format.Context) string {
+formatter.go	183	func escapeDiscordMarkdown(s string) string {
+formatter.go	242	func (portal *Portal) parseMatrixHTML(content *event.MessageEventContent, allowedLinkPreviews []string) (string, *discordgo.MessageAllowedMentions) {
+directmedia.go	74	func newDirectMediaAPI(br *DiscordBridge) *DirectMediaAPI {
+directmedia.go	167	func (dma *DirectMediaAPI) makeMXC(data MediaIDData) id.ContentURI {
+directmedia.go	174	func parseExpiryTS(addr string) time.Time {
+directmedia.go	190	func (dma *DirectMediaAPI) addAttachmentToCache(channelID uint64, att *discordgo.MessageAttachment) time.Time {
+directmedia.go	209	func (dma *DirectMediaAPI) AttachmentMXC(channelID, messageID string, att *discordgo.MessageAttachment) (mxc id.ContentURI) {
+directmedia.go	238	func (dma *DirectMediaAPI) EmojiMXC(emojiID, name string, animated bool) (mxc id.ContentURI) {
+directmedia.go	256	func (dma *DirectMediaAPI) StickerMXC(stickerID string, format discordgo.StickerFormat) (mxc id.ContentURI) {
+directmedia.go	274	func (dma *DirectMediaAPI) AvatarMXC(guildID, userID, avatarID string) (mxc id.ContentURI) {
+directmedia.go	320	func (re *RespError) Error() string {
+directmedia.go	327	func (dma *DirectMediaAPI) fetchNewAttachmentURL(ctx context.Context, meta *AttachmentMediaData) (string, time.Time, error) {
+directmedia.go	391	func (dma *DirectMediaAPI) GetEmojiInfo(contentURI id.ContentURI) *EmojiMediaData {
+directmedia.go	407	func (dma *DirectMediaAPI) getMediaURL(ctx context.Context, encodedMediaID string) (url string, expiry time.Time, err error) {
+directmedia.go	496	func (dma *DirectMediaAPI) proxyDownload(ctx context.Context, w http.ResponseWriter, url, fileName string) {
+directmedia.go	556	func (dma *DirectMediaAPI) DownloadMedia(w http.ResponseWriter, r *http.Request) {
+directmedia.go	636	func (dma *DirectMediaAPI) UploadNotSupported(w http.ResponseWriter, r *http.Request) {
+directmedia.go	643	func (dma *DirectMediaAPI) PreviewURLNotSupported(w http.ResponseWriter, r *http.Request) {
+directmedia.go	650	func (dma *DirectMediaAPI) UnknownEndpoint(w http.ResponseWriter, r *http.Request) {
+directmedia.go	657	func (dma *DirectMediaAPI) UnsupportedMethod(w http.ResponseWriter, r *http.Request) {
+thread.go	24	func (br *DiscordBridge) GetThreadByID(id string, root *database.Message) *Thread {
+thread.go	34	func (br *DiscordBridge) GetThreadByRootMXID(mxid id.EventID) *Thread {
+thread.go	44	func (br *DiscordBridge) GetThreadByRootOrCreationNoticeMXID(mxid id.EventID) *Thread {
+thread.go	57	func (br *DiscordBridge) loadThread(dbThread *database.Thread, id string, root *database.Message) *Thread {
+thread.go	81	func (br *DiscordBridge) threadFound(ctx context.Context, source *User, rootMessage *database.Message, id string, metadata *discordgo.Channel) {
+thread.go	103	func (thread *Thread) maybeInitialBackfill(source *User) {
+thread.go	115	func (thread *Thread) RefererOpt() discordgo.RequestOption {
+thread.go	119	func (thread *Thread) Join(user *User) {
+portal.go	92	func (portal *Portal) IsEncrypted() bool {
+portal.go	96	func (portal *Portal) MarkEncrypted() {
+portal.go	101	func (portal *Portal) ReceiveMatrixEvent(user bridge.User, evt *event.Event) {
+portal.go	111	func (br *DiscordBridge) loadPortal(dbPortal *database.Portal, key *database.PortalKey, chanType discordgo.ChannelType) *Portal {
+portal.go	145	func (br *DiscordBridge) GetPortalByMXID(mxid id.RoomID) *Portal {
+portal.go	157	func (user *User) GetPortalByMeta(meta *discordgo.Channel) *Portal {
+portal.go	161	func (user *User) GetExistingPortalByID(id string) *Portal {
+portal.go	165	func (user *User) GetPortalByID(id string, chanType discordgo.ChannelType) *Portal {
+portal.go	169	func (user *User) FindPrivateChatWith(userID string) *Portal {
+portal.go	183	func (br *DiscordBridge) GetExistingPortalByID(key database.PortalKey) *Portal {
+portal.go	199	func (br *DiscordBridge) GetPortalByID(key database.PortalKey, chanType discordgo.ChannelType) *Portal {
+portal.go	214	func (br *DiscordBridge) GetAllPortals() []*Portal {
+portal.go	218	func (br *DiscordBridge) GetAllPortalsInGuild(guildID string) []*Portal {
+portal.go	222	func (br *DiscordBridge) GetAllIPortals() (iportals []bridge.Portal) {
+portal.go	231	func (br *DiscordBridge) GetDMPortalsWith(otherUserID string) []*Portal {
+portal.go	235	func (br *DiscordBridge) dbPortalsToPortals(dbPortals []*database.Portal) []*Portal {
+portal.go	256	func (br *DiscordBridge) NewPortal(dbPortal *database.Portal) *Portal {
+portal.go	279	func (portal *Portal) messageLoop() {
+portal.go	290	func (portal *Portal) IsPrivateChat() bool {
+portal.go	294	func (portal *Portal) MainIntent() *appservice.IntentAPI {
+portal.go	308	func init() {
+portal.go	313	func (portal *Portal) getBridgeInfo() (string, CustomBridgeInfoContent) {
+portal.go	358	func (portal *Portal) UpdateBridgeInfo() {
+portal.go	376	func (portal *Portal) shouldSetDMRoomMetadata() bool {
+portal.go	382	func (portal *Portal) GetEncryptionEventContent() (evt *event.EncryptionEventContent) {
+portal.go	391	func (portal *Portal) CreateMatrixRoom(user *User, channel *discordgo.Channel) error {
+portal.go	565	func (portal *Portal) handleDiscordMessages(msg portalDiscordMessage) {
+portal.go	602	func (portal *Portal) ensureUserInvited(user *User, ignoreCache bool) bool {
+portal.go	606	func (portal *Portal) markMessageHandled(discordID string, authorID string, timestamp time.Time, threadID string, senderMXID id.UserID, parts []database.MessagePart) *database.Message {
+portal.go	620	func (portal *Portal) handleDiscordMessageCreate(user *User, msg *discordgo.Message, thread *Thread) {
+portal.go	715	func isReplyEmbed(embed *discordgo.MessageEmbed) bool {
+portal.go	719	func (portal *Portal) getReplyTarget(source *User, threadID string, ref *discordgo.MessageReference, embeds []*discordgo.MessageEmbed, allowNonExistent bool) *event.InReplyTo {
+portal.go	763	func (portal *Portal) sendThreadCreationNotice(ctx context.Context, thread *Thread) {
+portal.go	809	func (portal *Portal) handleDiscordMessageUpdate(user *User, msg *discordgo.Message) {
+portal.go	960	func (portal *Portal) handleDiscordMessageDelete(user *User, msg *discordgo.Message) {
+portal.go	967	func (portal *Portal) handleDiscordMessageDeleteBulk(user *User, messages []string) {
+portal.go	981	func (portal *Portal) redactAllParts(intent *appservice.IntentAPI, msgID string) (lastResp id.EventID) {
+portal.go	998	func (portal *Portal) handleDiscordTyping(evt *discordgo.TypingStart) {
+portal.go	1020	func (portal *Portal) syncParticipant(source *User, participant *discordgo.User, remove bool) {
+portal.go	1046	func (portal *Portal) syncParticipants(source *User, participants []*discordgo.User) {
+portal.go	1069	func (portal *Portal) encrypt(intent *appservice.IntentAPI, content *event.Content, eventType event.Type) (event.Type, error) {
+portal.go	1084	func (portal *Portal) sendMatrixMessage(intent *appservice.IntentAPI, eventType event.Type, content *event.MessageEventContent, extraContent map[string]interface{}, timestamp int64) (*mautrix.RespSendEvent, error) {
+portal.go	1100	func (portal *Portal) handleMatrixMessages(msg portalMatrixMessage) {
+portal.go	1117	func generateNonce() string {
+portal.go	1123	func (portal *Portal) getEvent(mxid id.EventID) (*event.Event, error) {
+portal.go	1140	func genThreadName(evt *event.Event) string {
+portal.go	1161	func (portal *Portal) startThreadFromMatrix(sender *User, threadRoot id.EventID) (string, error) {
+portal.go	1193	func (portal *Portal) sendErrorMessage(evt *event.Event, msgType, message string, confirmed bool) id.EventID {
+portal.go	1232	func errorToStatusReason(err error) (reason event.MessageStatusReason, status event.MessageStatus, isCertain, sendNotice bool, humanMessage string, checkpointError error) {
+portal.go	1283	func restErrorToStatusReason(msg *discordgo.APIErrorMessage) (reason event.MessageStatusReason, humanMessage string) {
+portal.go	1304	func (portal *Portal) sendStatusEvent(evtID id.EventID, err error) {
+portal.go	1339	func (portal *Portal) sendMessageMetrics(evt *event.Event, err error, part string) {
+portal.go	1388	func (br *DiscordBridge) serveMediaProxy(w http.ResponseWriter, r *http.Request) {
+portal.go	1431	func (br *DiscordBridge) hashMediaProxyURL(mxc id.ContentURI) (string, []byte) {
+portal.go	1438	func (br *DiscordBridge) makeMediaProxyURL(mxc id.ContentURI) string {
+portal.go	1446	func (portal *Portal) getRelayUserMeta(sender *User) (name, avatarURL string) {
+portal.go	1462	func cutBody(body string) string {
+portal.go	1482	func (portal *Portal) convertReplyMessageToEmbed(eventID id.EventID, url string) (*discordgo.MessageEmbed, error) {
+portal.go	1510	func (portal *Portal) RefererOpt(threadID string) discordgo.RequestOption {
+portal.go	1517	func (portal *Portal) RefererOptIfUser(sess *discordgo.Session, threadID string) []discordgo.RequestOption {
+portal.go	1524	func (portal *Portal) handleMatrixMessage(sender *User, evt *event.Event) {
+portal.go	1755	func parseAllowedLinkPreviews(raw map[string]any) []string {
+portal.go	1777	func (portal *Portal) sendDeliveryReceipt(eventID id.EventID) {
+portal.go	1788	func (portal *Portal) HandleMatrixLeave(brSender bridge.User) {
+portal.go	1799	func (portal *Portal) HandleMatrixKick(brSender bridge.User, brTarget bridge.Ghost)   {}
+portal.go	1800	func (portal *Portal) HandleMatrixInvite(brSender bridge.User, brTarget bridge.Ghost) {}
+portal.go	1802	func (portal *Portal) Delete() {
+portal.go	1812	func (portal *Portal) cleanupIfEmpty() {
+portal.go	1830	func (portal *Portal) RemoveMXID() {
+portal.go	1853	func (portal *Portal) cleanup(puppetsOnly bool) {
+portal.go	1877	func (br *DiscordBridge) cleanupRoom(intent *appservice.IntentAPI, mxid id.RoomID, puppetsOnly bool, log zerolog.Logger) {
+portal.go	1909	func (portal *Portal) getMatrixUsers() ([]id.UserID, error) {
+portal.go	1926	func (portal *Portal) handleMatrixReaction(sender *User, evt *event.Event) {
+portal.go	2006	func (portal *Portal) handleDiscordReaction(user *User, reaction *discordgo.MessageReaction, add bool, thread *Thread, member *discordgo.Member) {
+portal.go	2110	func (portal *Portal) handleMatrixRedaction(sender *User, evt *event.Event) {
+portal.go	2160	func (portal *Portal) HandleMatrixReadReceipt(brUser bridge.User, eventID id.EventID, receipt event.ReadReceipt) {
+portal.go	2229	func typingDiff(prev, new []id.UserID) (started []id.UserID) {
+portal.go	2242	func (portal *Portal) HandleMatrixTyping(newTyping []id.UserID) {
+portal.go	2265	func (portal *Portal) UpdateName(meta *discordgo.Channel) bool {
+portal.go	2284	func (portal *Portal) UpdateNameDirect(name string, isFriendNick bool) bool {
+portal.go	2300	func (portal *Portal) updateRoomName() {
+portal.go	2311	func (portal *Portal) UpdateAvatarFromPuppet(puppet *Puppet) bool {
+portal.go	2326	func (portal *Portal) UpdateGroupDMAvatar(iconID string) bool {
+portal.go	2352	func (portal *Portal) updateRoomAvatar() {
+portal.go	2364	func (portal *Portal) UpdateTopic(topic string) bool {
+portal.go	2378	func (portal *Portal) updateRoomTopic() {
+portal.go	2389	func (portal *Portal) removeFromSpace() {
+portal.go	2407	func (portal *Portal) addToSpace(mxid id.RoomID) bool {
+portal.go	2437	func (portal *Portal) UpdateParent(parentID string) bool {
+portal.go	2454	func (portal *Portal) ExpectedSpaceID() id.RoomID {
+portal.go	2463	func (portal *Portal) updateSpace(source *User) bool {
+portal.go	2483	func (portal *Portal) UpdateInfo(source *User, meta *discordgo.Channel) *discordgo.Channel {
+portal.go	2575	func (br *DiscordBridge) HandleTombstone(evt *event.Event) {
+database/database.go	28	func New(baseDB *dbutil.Database, log maulogger.Logger) *Database {
+database/database.go	70	func strPtr[T ~string](val T) *string {
+database/json.go	11	func JSONPtr[T any](val *T) dbutil.JSON {
+database/json.go	15	func UntypedNil[T any](val *T) any {
+database/user.go	17	func (uq *UserQuery) New() *User {
+database/user.go	24	func (uq *UserQuery) GetByMXID(userID id.UserID) *User {
+database/user.go	29	func (uq *UserQuery) GetByID(id string) *User {
+database/user.go	34	func (uq *UserQuery) GetAllWithToken() []*User {
+database/user.go	69	func (u *User) Scan(row dbutil.Scannable) *User {
+database/user.go	87	func (u *User) Insert() {
+database/user.go	96	func (u *User) Update() {
+database/message.go	24	func (mq *MessageQuery) New() *Message {
+database/message.go	31	func (mq *MessageQuery) scanAll(rows dbutil.Rows, err error) []*Message {
+database/message.go	47	func (mq *MessageQuery) GetByDiscordID(key PortalKey, discordID string) []*Message {
+database/message.go	52	func (mq *MessageQuery) GetFirstByDiscordID(key PortalKey, discordID string) *Message {
+database/message.go	57	func (mq *MessageQuery) GetLastByDiscordID(key PortalKey, discordID string) *Message {
+database/message.go	62	func (mq *MessageQuery) GetClosestBefore(key PortalKey, threadID string, ts time.Time) *Message {
+database/message.go	67	func (mq *MessageQuery) GetLastInThread(key PortalKey, threadID string) *Message {
+database/message.go	72	func (mq *MessageQuery) GetLast(key PortalKey) *Message {
+database/message.go	77	func (mq *MessageQuery) DeleteAll(key PortalKey) {
+database/message.go	86	func (mq *MessageQuery) GetByMXID(key PortalKey, mxid id.EventID) *Message {
+database/message.go	97	func (mq *MessageQuery) MassInsert(key PortalKey, msgs []Message) {
+database/message.go	144	func (m *Message) DiscordProtoChannelID() string {
+database/message.go	152	func (m *Message) Scan(row dbutil.Scannable) *Message {
+database/message.go	189	func (m *Message) editTimestampVal() int64 {
+database/message.go	196	func (m *Message) MassInsertParts(msgs []MessagePart) {
+database/message.go	226	func (m *Message) Insert() {
+database/message.go	243	func (m *Message) UpdateEditTimestamp(ts time.Time) {
+database/message.go	251	func (m *Message) Delete() {
+database/guild.go	29	func ParseGuildBridgingMode(str string) GuildBridgingMode {
+database/guild.go	47	func (gbm GuildBridgingMode) String() string {
+database/guild.go	62	func (gbm GuildBridgingMode) Description() string {
+database/guild.go	86	func (gq *GuildQuery) New() *Guild {
+database/guild.go	93	func (gq *GuildQuery) GetByID(dcid string) *Guild {
+database/guild.go	98	func (gq *GuildQuery) GetByMXID(mxid id.RoomID) *Guild {
+database/guild.go	103	func (gq *GuildQuery) GetAll() []*Guild {
+database/guild.go	137	func (g *Guild) Scan(row dbutil.Scannable) *Guild {
+database/guild.go	157	func (g *Guild) mxidPtr() *id.RoomID {
+database/guild.go	164	func (g *Guild) Insert() {
+database/guild.go	176	func (g *Guild) Update() {
+database/guild.go	188	func (g *Guild) Delete() {
+database/thread.go	21	func (tq *ThreadQuery) New() *Thread {
+database/thread.go	28	func (tq *ThreadQuery) GetByDiscordID(discordID string) *Thread {
+database/thread.go	39	func (tq *ThreadQuery) GetByMatrixRootMsg(mxid id.EventID) *Thread {
+database/thread.go	50	func (tq *ThreadQuery) GetByMatrixRootOrCreationNoticeMsg(mxid id.EventID) *Thread {
+database/thread.go	74	func (t *Thread) Scan(row dbutil.Scannable) *Thread {
+database/thread.go	86	func (t *Thread) Insert() {
+database/thread.go	95	func (t *Thread) Update() {
+database/thread.go	104	func (t *Thread) Delete() {
+database/role.go	30	func (rq *RoleQuery) New() *Role {
+database/role.go	37	func (rq *RoleQuery) GetByID(guildID, dcid string) *Role {
+database/role.go	42	func (rq *RoleQuery) DeleteByID(guildID, dcid string) {
+database/role.go	50	func (rq *RoleQuery) GetAll(guildID string) []*Role {
+database/role.go	77	func (r *Role) Scan(row dbutil.Scannable) *Role {
+database/role.go	92	func (r *Role) Upsert(txn dbutil.Execable) {
+database/role.go	103	func (r *Role) Delete(txn dbutil.Execable) {
+database/reaction.go	21	func (rq *ReactionQuery) New() *Reaction {
+database/reaction.go	28	func (rq *ReactionQuery) GetAllForMessage(key PortalKey, discordMessageID string) []*Reaction {
+database/reaction.go	34	func (rq *ReactionQuery) getAll(query string, args ...interface{}) []*Reaction {
+database/reaction.go	48	func (rq *ReactionQuery) GetByDiscordID(key PortalKey, msgID, sender, emojiName string) *Reaction {
+database/reaction.go	54	func (rq *ReactionQuery) GetByMXID(mxid id.EventID) *Reaction {
+database/reaction.go	60	func (rq *ReactionQuery) get(query string, args ...interface{}) *Reaction {
+database/reaction.go	84	func (r *Reaction) Scan(row dbutil.Scannable) *Reaction {
+database/reaction.go	97	func (r *Reaction) DiscordProtoChannelID() string {
+database/reaction.go	105	func (r *Reaction) Insert() {
+database/reaction.go	117	func (r *Reaction) Delete() {
+database/file.go	29	func (fq *FileQuery) New() *File {
+database/file.go	36	func (fq *FileQuery) Get(url string, encrypted bool) *File {
+database/file.go	41	func (fq *FileQuery) GetEmojiByMXC(mxc id.ContentURI) *File {
+database/file.go	66	func (f *File) Scan(row dbutil.Scannable) *File {
+database/file.go	99	func positiveIntToNullInt32(val int) (ptr sql.NullInt32) {
+database/file.go	107	func (f *File) Insert(txn dbutil.Execable) {
+database/file.go	132	func (f *File) Delete() {
+database/portal.go	27	func NewPortalKey(channelID, receiver string) PortalKey {
+database/portal.go	34	func (key PortalKey) String() string {
+database/portal.go	46	func (pq *PortalQuery) New() *Portal {
+database/portal.go	53	func (pq *PortalQuery) GetAll() []*Portal {
+database/portal.go	57	func (pq *PortalQuery) GetAllInGuild(guildID string) []*Portal {
+database/portal.go	61	func (pq *PortalQuery) GetByID(key PortalKey) *Portal {
+database/portal.go	65	func (pq *PortalQuery) GetByMXID(mxid id.RoomID) *Portal {
+database/portal.go	69	func (pq *PortalQuery) FindPrivateChatBetween(id, receiver string) *Portal {
+database/portal.go	73	func (pq *PortalQuery) FindPrivateChatsWith(id string) []*Portal {
+database/portal.go	77	func (pq *PortalQuery) FindPrivateChatsOf(receiver string) []*Portal {
+database/portal.go	83	func (pq *PortalQuery) getAll(query string, args ...interface{}) []*Portal {
+database/portal.go	98	func (pq *PortalQuery) get(query string, args ...interface{}) *Portal {
+database/portal.go	132	func (p *Portal) Scan(row dbutil.Scannable) *Portal {
+database/portal.go	163	func (p *Portal) Insert() {
+database/portal.go	181	func (p *Portal) Update() {
+database/portal.go	203	func (p *Portal) Delete() {
+database/userportal.go	26	func (up UserPortal) Scan(l log.Logger, row dbutil.Scannable) *UserPortal {
+database/userportal.go	37	func (u *User) scanUserPortals(rows dbutil.Rows) []UserPortal {
+database/userportal.go	48	func (db *Database) GetUsersInPortal(channelID string) []id.UserID {
+database/userportal.go	66	func (u *User) GetPortals() []UserPortal {
+database/userportal.go	75	func (u *User) IsInSpace(discordID string) (isIn bool) {
+database/userportal.go	85	func (u *User) IsInPortal(discordID string) (isIn bool) {
+database/userportal.go	95	func (u *User) MarkInPortal(portal UserPortal) {
+database/userportal.go	109	func (u *User) MarkNotInPortal(discordID string) {
+database/userportal.go	118	func (u *User) PortalHasOtherUsers(discordID string) (hasOtherUsers bool) {
+database/userportal.go	128	func (u *User) PrunePortalList(beforeTS time.Time) []UserPortal {
+database/puppet.go	22	func (pq *PuppetQuery) New() *Puppet {
+database/puppet.go	29	func (pq *PuppetQuery) Get(id string) *Puppet {
+database/puppet.go	33	func (pq *PuppetQuery) GetByCustomMXID(mxid id.UserID) *Puppet {
+database/puppet.go	37	func (pq *PuppetQuery) get(query string, args ...interface{}) *Puppet {
+database/puppet.go	41	func (pq *PuppetQuery) GetAll() []*Puppet {
+database/puppet.go	45	func (pq *PuppetQuery) GetAllWithCustomMXID() []*Puppet {
+database/puppet.go	49	func (pq *PuppetQuery) getAll(query string, args ...interface{}) []*Puppet {
+database/puppet.go	89	func (p *Puppet) Scan(row dbutil.Scannable) *Puppet {
+database/puppet.go	113	func (p *Puppet) Insert() {
+database/puppet.go	132	func (p *Puppet) Update() {
+database/upgrades/upgrades.go	30	func init() {
