@@ -1,7 +1,8 @@
 ## Tests for bridge/user.nim — User session management.
 
-import std/[unittest, json, options, tables, times]
+import std/[unittest, strutils, options, tables, times]
 import database/[database, entities, store]
+import config/config
 import bridge/runtime
 import bridge/portal
 import bridge/user
@@ -10,18 +11,22 @@ import bridge/user
 # Test helpers
 # ===========================================================================
 
-proc makeTestDb(): BridgeDb =
-  newBridgeDb(":memory:")
+var testDbCounter = 0
 
 proc makeTestRuntime(): DiscordBridgeRuntime =
-  let db = makeTestDb()
-  newDiscordBridgeRuntime(newConfig(), db)
+  testDbCounter.inc
+  let dbPath = "tests/fixtures/user-test-" & $getTime().toUnix() & "-" & $testDbCounter & ".db"
+  let cfg = defaultConfig()
+  let db = openBridgeDb("file:" & dbPath, "sqlite")
+  newDiscordBridgeRuntime(cfg, db)
 
 proc makeTestUserCtx(runtime: DiscordBridgeRuntime = nil, mxid = "@test:example.com"): UserContext =
   let rt = if runtime.isNil: makeTestRuntime() else: runtime
   let ctx = newUserContext(rt, mxid)
   ctx.discordToken = "test-token-123"
   ctx.discordId = "123456789"
+  # Insert user into DB so updateDb works
+  rt.db.insertUser(ctx.toRecord())
   ctx
 
 # ===========================================================================
@@ -30,7 +35,6 @@ proc makeTestUserCtx(runtime: DiscordBridgeRuntime = nil, mxid = "@test:example.
 
 type
   BridgeStateLog = seq[BridgeState]
-  PortalCallLog = seq[tuple[key: PortalKey, event: string]]
 
 proc makeBridgeStateLogger(): tuple[logger: SendBridgeStateProc, log: ref BridgeStateLog] =
   var log: ref BridgeStateLog
@@ -418,7 +422,6 @@ suite "user: channel event handlers":
 
   test "channelDeleteHandler calls deletePortal":
     let ctx = makeTestUserCtx()
-    # Create a portal first
     let key = PortalKey(channelId: "ch1", receiver: "")
     var rec = newPortalRecord(key, 0)
     rec.mxid = "!room:hs"
@@ -635,7 +638,7 @@ suite "user: bridge/unbridge guild":
     ctx.runtime.guilds.upsert(guild)
     let r = ctx.unbridgeGuild("g1")
     check r.ok == false
-    check "not bridged" in r.err
+    check r.err.contains("not bridged")
 
   test "unbridgeGuild fails for non-admin with other users":
     let ctx = makeTestUserCtx()
@@ -645,7 +648,7 @@ suite "user: bridge/unbridge guild":
     guild.mxid = "!room:hs"
     ctx.runtime.guilds.upsert(guild)
     # Add another user to the portal
-    let otherUser = UserRecord(mxid: "@other:hs.tld", discordId: "other1")
+    let otherUser = UserRecord(mxid: "@other:hs.tld")
     ctx.runtime.db.insertUser(otherUser)
     ctx.runtime.db.markUserInPortal(UserPortalRecord(
       discordId: "g1", userMxid: "@other:hs.tld", portalType: "guild",
@@ -653,7 +656,7 @@ suite "user: bridge/unbridge guild":
     ))
     let r = ctx.unbridgeGuild("g1")
     check r.ok == false
-    check "admin" in r.err
+    check r.err.contains("admin")
 
 suite "user: startup try connect":
   test "startupTryConnect succeeds on first try":

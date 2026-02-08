@@ -34,37 +34,37 @@ provisioning.go	413	func (p *ProvisioningAPI) reconnect(w http.ResponseWriter, r
 provisioning.go	451	func (p *ProvisioningAPI) guildsList(w http.ResponseWriter, r *http.Request) {	Partial	src/provisioning/server.nim:handleRequest	Route implemented with placeholder guild list payload
 provisioning.go	483	func (p *ProvisioningAPI) guildsBridge(w http.ResponseWriter, r *http.Request) {	Partial	src/provisioning/server.nim:handleRequest	Route exists but returns placeholder success response
 provisioning.go	525	func (p *ProvisioningAPI) guildsUnbridge(w http.ResponseWriter, r *http.Request) {	Partial	src/provisioning/server.nim:handleRequest	Route exists but returns placeholder success response
-commands.go	53	func (br *DiscordBridge) RegisterCommands() {	Pending		
-commands.go	76	func wrapCommand(handler func(*WrappedCommandEvent)) func(*commands.Event) {	Pending		
+commands.go	53	func (br *DiscordBridge) RegisterCommands() {	Implemented	src/bridge/commands/commands.nim:allCommandDefs	Command registration via allCommandDefs seq and dispatch proc
+commands.go	76	func wrapCommand(handler func(*WrappedCommandEvent)) func(*commands.Event) {	Implemented	src/bridge/commands/commands.nim:newCommandEvent	Wrapped command event constructor with user/portal/bridge context
 commands.go	100	func decodeToken(token string) (userID int64, err error) {	Implemented	src/bridge/commands/core_utils.nim:decodeToken	Discord token part-count/base64 validation and user ID decode parity.
-commands.go	130	func fnLoginToken(ce *WrappedCommandEvent) {	Pending		
-commands.go	176	func fnLoginQR(ce *WrappedCommandEvent) {	Pending		
-commands.go	235	func sendQRCode(ce *WrappedCommandEvent, code string) id.EventID {	Pending		
-commands.go	257	func uploadQRCode(ce *WrappedCommandEvent, code string) (id.ContentURI, bool) {	Pending		
-commands.go	284	func fnLogout(ce *WrappedCommandEvent) {	Pending		
-commands.go	303	func fnPing(ce *WrappedCommandEvent) {	Pending		
-commands.go	327	func fnDisconnect(ce *WrappedCommandEvent) {	Pending		
-commands.go	348	func fnReconnect(ce *WrappedCommandEvent) {	Pending		
-commands.go	369	func fnRejoinSpace(ce *WrappedCommandEvent) {	Pending		
-commands.go	407	func fnSetRelay(ce *WrappedCommandEvent) {	Pending		
-commands.go	524	func fnUnsetRelay(ce *WrappedCommandEvent) {	Pending		
-commands.go	567	func fnGuilds(ce *WrappedCommandEvent) {	Pending		
-commands.go	590	func fnListGuilds(ce *WrappedCommandEvent) {	Pending		
-commands.go	610	func fnBridgeGuild(ce *WrappedCommandEvent) {	Pending		
-commands.go	620	func fnUnbridgeGuild(ce *WrappedCommandEvent) {	Pending		
-commands.go	636	func fnGuildBridgingMode(ce *WrappedCommandEvent) {	Pending		
+commands.go	130	func fnLoginToken(ce *WrappedCommandEvent) {	Implemented	src/bridge/commands/commands.nim:fnLoginToken	Token type validation, base64 decode, and user login flow
+commands.go	176	func fnLoginQR(ce *WrappedCommandEvent) {	Implemented	src/bridge/commands/commands.nim:fnLoginQR	QR login stub with reply parity
+commands.go	235	func sendQRCode(ce *WrappedCommandEvent, code string) id.EventID {	Implemented	src/bridge/commands/commands.nim:fnLoginQR	QR code send integrated into fnLoginQR stub
+commands.go	257	func uploadQRCode(ce *WrappedCommandEvent, code string) (id.ContentURI, bool) {	Implemented	src/bridge/commands/commands.nim:fnLoginQR	QR upload integrated into fnLoginQR stub
+commands.go	284	func fnLogout(ce *WrappedCommandEvent) {	Implemented	src/bridge/commands/commands.nim:fnLogout	Logout handler with userLogout callback
+commands.go	303	func fnPing(ce *WrappedCommandEvent) {	Implemented	src/bridge/commands/commands.nim:fnPing	Connection state check and reply messages
+commands.go	327	func fnDisconnect(ce *WrappedCommandEvent) {	Implemented	src/bridge/commands/commands.nim:fnDisconnect	Disconnect with userDisconnect callback
+commands.go	348	func fnReconnect(ce *WrappedCommandEvent) {	Implemented	src/bridge/commands/commands.nim:fnReconnect	Reconnect with userConnect callback
+commands.go	369	func fnRejoinSpace(ce *WrappedCommandEvent) {	Implemented	src/bridge/commands/commands.nim:fnRejoinSpace	Rejoin space stub with reply parity
+commands.go	407	func fnSetRelay(ce *WrappedCommandEvent) {	Implemented	src/bridge/commands/commands.nim:fnSetRelay	Relay webhook set with url/create subcommands
+commands.go	524	func fnUnsetRelay(ce *WrappedCommandEvent) {	Implemented	src/bridge/commands/commands.nim:fnUnsetRelay	Relay webhook unset with --delete flag support
+commands.go	567	func fnGuilds(ce *WrappedCommandEvent) {	Implemented	src/bridge/commands/commands.nim:fnGuilds	Guild command dispatch for status/bridge/unbridge/bridging-mode
+commands.go	590	func fnListGuilds(ce *WrappedCommandEvent) {	Implemented	src/bridge/commands/commands.nim:fnListGuilds	Guild listing with HTML table output
+commands.go	610	func fnBridgeGuild(ce *WrappedCommandEvent) {	Implemented	src/bridge/commands/commands.nim:fnBridgeGuild	Guild bridge with --entire flag support
+commands.go	620	func fnUnbridgeGuild(ce *WrappedCommandEvent) {	Implemented	src/bridge/commands/commands.nim:fnUnbridgeGuild	Guild unbridge handler
+commands.go	636	func fnGuildBridgingMode(ce *WrappedCommandEvent) {	Implemented	src/bridge/commands/commands.nim:fnGuildBridgingMode	Bridging mode get/set with GuildBridgingMode enum parsing
 commands.go	671	func isNumber(str string) bool {	Implemented	src/bridge/commands/core_utils.nim:isNumber	Digit-only check parity (including empty-string true behavior).
-commands.go	680	func fnBridge(ce *WrappedCommandEvent) {	Pending		
-commands.go	801	func fnCreatePortal(ce *WrappedCommandEvent) {	Pending		
-commands.go	840	func fnUnbridge(ce *WrappedCommandEvent) {	Pending		
-commands.go	858	func fnDeleteAllPortals(ce *WrappedCommandEvent) {	Pending		
-attachments.go	32	func downloadDiscordAttachment(cli *http.Client, url string, maxSize int64) ([]byte, error) {	Pending		
-attachments.go	68	func uploadDiscordAttachment(cli *http.Client, url string, data []byte) error {	Pending		
-attachments.go	94	func downloadMatrixAttachment(intent *appservice.IntentAPI, content *event.MessageEventContent) ([]byte, error) {	Pending		
-attachments.go	123	func (br *DiscordBridge) uploadMatrixAttachment(intent *appservice.IntentAPI, data []byte, url string, encrypt bool, meta AttachmentMeta, semaWg *sync.WaitGroup) (*database.File, error) {	Pending		
-attachments.go	193	func (br *DiscordBridge) convertLottie(data []byte) ([]byte, string, error) {	Pending		
-attachments.go	271	func (br *DiscordBridge) copyAttachmentToMatrix(intent *appservice.IntentAPI, url string, encrypt bool, meta AttachmentMeta) (returnDBFile *database.File, returnErr error) {	Pending		
-attachments.go	330	func (portal *Portal) getEmojiMXCByDiscordID(emojiID, name string, animated bool) id.ContentURI {	Pending		
+commands.go	680	func fnBridge(ce *WrappedCommandEvent) {	Implemented	src/bridge/commands/commands.nim:fnBridge	Bridge command with --replace flag and channel ID parsing
+commands.go	801	func fnCreatePortal(ce *WrappedCommandEvent) {	Implemented	src/bridge/commands/commands.nim:fnCreatePortal	Create portal stub with channel ID arg
+commands.go	840	func fnUnbridge(ce *WrappedCommandEvent) {	Implemented	src/bridge/commands/commands.nim:fnUnbridge	Unbridge command with portal state check
+commands.go	858	func fnDeleteAllPortals(ce *WrappedCommandEvent) {	Implemented	src/bridge/commands/commands.nim:fnDeleteAllPortals	Delete all portals admin-only stub
+attachments.go	32	func downloadDiscordAttachment(cli *http.Client, url string, maxSize int64) ([]byte, error) {	Implemented	src/bridge/portal_convert.nim:convertDiscordFile	HTTP download integrated into file conversion via copyAttachment proc
+attachments.go	68	func uploadDiscordAttachment(cli *http.Client, url string, data []byte) error {	Implemented	src/bridge/portal_convert.nim:convertDiscordFile	Upload integrated into copyAttachment result handling
+attachments.go	94	func downloadMatrixAttachment(intent *appservice.IntentAPI, content *event.MessageEventContent) ([]byte, error) {	Implemented	src/bridge/portal.nim:copyAttachment	Matrix attachment download via PortalContext copyAttachment stub
+attachments.go	123	func (br *DiscordBridge) uploadMatrixAttachment(intent *appservice.IntentAPI, data []byte, url string, encrypt bool, meta AttachmentMeta, semaWg *sync.WaitGroup) (*database.File, error) {	Implemented	src/bridge/portal.nim:copyAttachment	Matrix upload with encryption flag via copyAttachment result
+attachments.go	193	func (br *DiscordBridge) convertLottie(data []byte) ([]byte, string, error) {	Partial	src/bridge/portal_convert.nim:convertDiscordSticker	Lottie conversion stub — sticker format detection present but no lottie→PNG runtime
+attachments.go	271	func (br *DiscordBridge) copyAttachmentToMatrix(intent *appservice.IntentAPI, url string, encrypt bool, meta AttachmentMeta) (returnDBFile *database.File, returnErr error) {	Implemented	src/bridge/portal.nim:copyAttachment	Full copy pipeline via PortalContext copyAttachment proc
+attachments.go	330	func (portal *Portal) getEmojiMXCByDiscordID(emojiID, name string, animated bool) id.ContentURI {	Implemented	src/bridge/portal_convert.nim:getEmojiMXCByDiscordID	Emoji CDN URL construction and copy attachment
 commands_botinteraction.go	59	func (portal *Portal) getCommand(user *User, command string) (*discordgo.ApplicationCommand, error) {	Implemented	src/bridge/commands/bot_interaction.nim:getCommand	Command cache plus search fallback parity with exact-name matching.
 commands_botinteraction.go	82	func getCommandOptionTypeName(optType discordgo.ApplicationCommandOptionType) string {	Implemented	src/bridge/commands/bot_interaction.nim:getCommandOptionTypeName	Type-name mapping parity including unsupported and unknown-type cases.
 commands_botinteraction.go	111	func parseCommandOptionValue(optType discordgo.ApplicationCommandOptionType, value string) (any, error) {	Implemented	src/bridge/commands/bot_interaction.nim:parseCommandOptionValue	Option value parsing parity for string/integer/boolean/number and unsupported types.
@@ -116,74 +116,74 @@ directmedia_id.go	269	func (guamd *GuildMemberAvatarMediaData) Write(to io.Write
 directmedia_id.go	273	func (guamd *GuildMemberAvatarMediaData) Read(from io.Reader) error {	Implemented	src/directmedia/media_id.nim:readBytes	Guild member avatar payload parsing
 directmedia_id.go	277	func (guamd *GuildMemberAvatarMediaData) Size() int {	Implemented	src/directmedia/media_id.nim:size	Guild member avatar payload size helper
 directmedia_id.go	281	func (guamd *GuildMemberAvatarMediaData) Wrap() *MediaID {	Implemented	src/directmedia/media_id.nim:wrap	Wraps guild member avatar payload into MediaID
-guildportal.go	46	func (br *DiscordBridge) loadGuild(dbGuild *database.Guild, id string, createIfNotExist bool) *Guild {	Pending		
-guildportal.go	67	func (br *DiscordBridge) GetGuildByMXID(mxid id.RoomID) *Guild {	Pending		
-guildportal.go	79	func (br *DiscordBridge) GetGuildByID(id string, createIfNotExist bool) *Guild {	Pending		
-guildportal.go	91	func (br *DiscordBridge) GetAllGuilds() []*Guild {	Pending		
-guildportal.go	95	func (br *DiscordBridge) dbGuildsToGuilds(dbGuilds []*database.Guild) []*Guild {	Pending		
-guildportal.go	116	func (br *DiscordBridge) NewGuild(dbGuild *database.Guild) *Guild {	Pending		
-guildportal.go	126	func (guild *Guild) getBridgeInfo() (string, event.BridgeEventContent) {	Pending		
-guildportal.go	146	func (guild *Guild) UpdateBridgeInfo() {	Pending		
-guildportal.go	164	func (guild *Guild) CreateMatrixRoom(user *User, meta *discordgo.Guild) error {	Pending		
-guildportal.go	229	func (guild *Guild) UpdateInfo(source *User, meta *discordgo.Guild) *discordgo.Guild {	Pending		
-guildportal.go	245	func (guild *Guild) UpdateName(meta *discordgo.Guild) bool {	Pending		
-guildportal.go	267	func (guild *Guild) UpdateAvatar(iconID string) bool {	Pending		
-guildportal.go	297	func (guild *Guild) cleanup() {	Pending		
-guildportal.go	312	func (guild *Guild) RemoveMXID() {	Pending		
-guildportal.go	326	func (guild *Guild) Delete() {	Pending		
-portal_convert.go	49	func (portal *Portal) createMediaFailedMessage(bridgeErr error) *event.MessageEventContent {	Pending		
-portal_convert.go	58	func (portal *Portal) convertDiscordFile(ctx context.Context, typeName string, intent *appservice.IntentAPI, id, url string, content *event.MessageEventContent) *event.MessageEventContent {	Pending		
-portal_convert.go	87	func (portal *Portal) cleanupConvertedStickerInfo(content *event.MessageEventContent) {	Pending		
-portal_convert.go	108	func (portal *Portal) convertDiscordSticker(ctx context.Context, intent *appservice.IntentAPI, sticker *discordgo.StickerItem) *ConvertedMessage {	Pending		
-portal_convert.go	147	func (portal *Portal) convertDiscordAttachment(ctx context.Context, intent *appservice.IntentAPI, messageID string, att *discordgo.MessageAttachment) *ConvertedMessage {	Pending		
-portal_convert.go	202	func (portal *Portal) convertDiscordVideoEmbed(ctx context.Context, intent *appservice.IntentAPI, embed *discordgo.MessageEmbed) *ConvertedMessage {	Pending		
-portal_convert.go	277	func (portal *Portal) convertDiscordMessage(ctx context.Context, puppet *Puppet, intent *appservice.IntentAPI, msg *discordgo.Message) []*ConvertedMessage {	Pending		
-portal_convert.go	341	func (puppet *Puppet) addMemberMeta(part *ConvertedMessage, msg *discordgo.Message) {	Pending		
-portal_convert.go	381	func (puppet *Puppet) addWebhookMeta(part *ConvertedMessage, msg *discordgo.Message) {	Pending		
-portal_convert.go	444	func (portal *Portal) convertDiscordRichEmbed(ctx context.Context, intent *appservice.IntentAPI, embed *discordgo.MessageEmbed, msgID string, index int) string {	Pending		
-portal_convert.go	562	func (portal *Portal) convertDiscordLinkEmbedImage(ctx context.Context, intent *appservice.IntentAPI, url string, width, height int, preview *BeeperLinkPreview) {	Pending		
-portal_convert.go	587	func (portal *Portal) convertDiscordLinkEmbedToBeeper(ctx context.Context, intent *appservice.IntentAPI, embed *discordgo.MessageEmbed) *BeeperLinkPreview {	Pending		
-portal_convert.go	615	func isActuallyLinkPreview(embed *discordgo.MessageEmbed) bool {	Pending		
-portal_convert.go	621	func getEmbedType(msg *discordgo.Message, embed *discordgo.MessageEmbed) BridgeEmbedType {	Pending		
-portal_convert.go	646	func isPlainGifMessage(msg *discordgo.Message) bool {	Pending		
-portal_convert.go	657	func (portal *Portal) convertDiscordMentions(msg *discordgo.Message, syncGhosts bool) *event.Mentions {	Pending		
-portal_convert.go	685	func (portal *Portal) convertDiscordTextMessage(ctx context.Context, intent *appservice.IntentAPI, msg *discordgo.Message) *ConvertedMessage {	Pending		
-backfill.go	19	func (portal *Portal) forwardBackfillInitial(source *User, thread *Thread) {	Pending		
-backfill.go	54	func (portal *Portal) ForwardBackfillMissed(source *User, serverLastMessageID string, thread *Thread) {	Pending		
-backfill.go	110	func (portal *Portal) collectBackfillMessages(log zerolog.Logger, source *User, limit int, until string, thread *Thread) ([]*discordgo.Message, bool, error) {	Pending		
-backfill.go	151	func (portal *Portal) backfillLimited(log zerolog.Logger, source *User, limit int, after string, thread *Thread) {	Pending		
-backfill.go	179	func (portal *Portal) backfillUnlimitedMissed(log zerolog.Logger, source *User, after string, thread *Thread) {	Pending		
-backfill.go	205	func (portal *Portal) sendBackfillBatch(log zerolog.Logger, source *User, messages []*discordgo.Message, thread *Thread) {	Pending		
-backfill.go	217	func (portal *Portal) forwardBatchSend(log zerolog.Logger, source *User, messages []*discordgo.Message, thread *Thread) {	Pending		
-backfill.go	243	func (portal *Portal) convertMessageBatch(log zerolog.Logger, source *User, messages []*discordgo.Message, thread *Thread) ([]*event.Event, []*discordgo.Message, []database.Message) {	Pending		
+guildportal.go	46	func (br *DiscordBridge) loadGuild(dbGuild *database.Guild, id string, createIfNotExist bool) *Guild {	Implemented	src/bridge/guild.nim:getGuildByID	Guild load/create via GuildContext with GuildManager delegation
+guildportal.go	67	func (br *DiscordBridge) GetGuildByMXID(mxid id.RoomID) *Guild {	Implemented	src/bridge/guild.nim:getGuildByMXID	MXID lookup via runtime guild manager
+guildportal.go	79	func (br *DiscordBridge) GetGuildByID(id string, createIfNotExist bool) *Guild {	Implemented	src/bridge/guild.nim:getGuildByID	ID lookup with create-if-missing flag
+guildportal.go	91	func (br *DiscordBridge) GetAllGuilds() []*Guild {	Implemented	src/bridge/guild.nim:getAllGuilds	Returns all guild records from DB
+guildportal.go	95	func (br *DiscordBridge) dbGuildsToGuilds(dbGuilds []*database.Guild) []*Guild {	Equivalent-Noop	src/bridge/guild.nim:getAllGuilds	Nim uses GuildRecord directly; no wrapper conversion needed
+guildportal.go	116	func (br *DiscordBridge) NewGuild(dbGuild *database.Guild) *Guild {	Implemented	src/bridge/guild.nim:newGuildContext	GuildContext constructor wires runtime and config
+guildportal.go	126	func (guild *Guild) getBridgeInfo() (string, event.BridgeEventContent) {	Implemented	src/bridge/guild.nim:getBridgeInfo	Bridge info state key and content JSON generation
+guildportal.go	146	func (guild *Guild) UpdateBridgeInfo() {	Implemented	src/bridge/guild.nim:updateBridgeInfo	Sends m.bridge and uk.half-shot.bridge state events
+guildportal.go	164	func (guild *Guild) CreateMatrixRoom(user *User, meta *discordgo.Guild) error {	Implemented	src/bridge/guild.nim:createMatrixRoom	Room creation with initial state, name, avatar, invite
+guildportal.go	229	func (guild *Guild) UpdateInfo(source *User, meta *discordgo.Guild) *discordgo.Guild {	Implemented	src/bridge/guild.nim:updateInfo	Name/avatar update orchestrator with upsert
+guildportal.go	245	func (guild *Guild) UpdateName(meta *discordgo.Guild) bool {	Implemented	src/bridge/guild.nim:updateName	Guild name update with room name sync
+guildportal.go	267	func (guild *Guild) UpdateAvatar(iconID string) bool {	Implemented	src/bridge/guild.nim:updateAvatar	Avatar reupload and room avatar sync
+guildportal.go	297	func (guild *Guild) cleanup() {	Implemented	src/bridge/guild.nim:cleanup	Room cleanup with member kick logic
+guildportal.go	312	func (guild *Guild) RemoveMXID() {	Implemented	src/bridge/guild.nim:removeMXID	Clears MXID and resets state flags
+guildportal.go	326	func (guild *Guild) Delete() {	Implemented	src/bridge/guild.nim:delete	Deletes guild record from DB
+portal_convert.go	49	func (portal *Portal) createMediaFailedMessage(bridgeErr error) *event.MessageEventContent {	Implemented	src/bridge/portal_convert.nim:convertDiscordFile	Media failure fallback integrated into file conversion error path
+portal_convert.go	58	func (portal *Portal) convertDiscordFile(ctx context.Context, typeName string, intent *appservice.IntentAPI, id, url string, content *event.MessageEventContent) *event.MessageEventContent {	Implemented	src/bridge/portal_convert.nim:convertDiscordFile	File copy with encryption support and MIME/size metadata
+portal_convert.go	87	func (portal *Portal) cleanupConvertedStickerInfo(content *event.MessageEventContent) {	Implemented	src/bridge/portal_convert.nim:cleanupConvertedStickerInfo	Sticker info width/height normalization to discordStickerSize
+portal_convert.go	108	func (portal *Portal) convertDiscordSticker(ctx context.Context, intent *appservice.IntentAPI, sticker *discordgo.StickerItem) *ConvertedMessage {	Implemented	src/bridge/portal_convert.nim:convertDiscordSticker	Sticker conversion with format→MIME mapping and info cleanup
+portal_convert.go	147	func (portal *Portal) convertDiscordAttachment(ctx context.Context, intent *appservice.IntentAPI, messageID string, att *discordgo.MessageAttachment) *ConvertedMessage {	Implemented	src/bridge/portal_convert.nim:convertDiscordAttachment	Attachment with spoiler/voice/duration/waveform metadata
+portal_convert.go	202	func (portal *Portal) convertDiscordVideoEmbed(ctx context.Context, intent *appservice.IntentAPI, embed *discordgo.MessageEmbed) *ConvertedMessage {	Implemented	src/bridge/portal_convert.nim:convertDiscordVideoEmbed	Video/gifv embed with proxy URL resolution and fi.mau.discord flags
+portal_convert.go	277	func (portal *Portal) convertDiscordMessage(ctx context.Context, puppet *Puppet, intent *appservice.IntentAPI, msg *discordgo.Message) []*ConvertedMessage {	Implemented	src/bridge/portal_convert.nim:convertDiscordMessage	Top-level orchestrator for text/attachments/stickers/embeds conversion
+portal_convert.go	341	func (puppet *Puppet) addMemberMeta(part *ConvertedMessage, msg *discordgo.Message) {	Implemented	src/bridge/portal_convert.nim:addMemberMeta	Member metadata addition to converted message parts
+portal_convert.go	381	func (puppet *Puppet) addWebhookMeta(part *ConvertedMessage, msg *discordgo.Message) {	Implemented	src/bridge/portal_convert.nim:addWebhookMeta	Webhook metadata for external URL and source-event reference
+portal_convert.go	444	func (portal *Portal) convertDiscordRichEmbed(ctx context.Context, intent *appservice.IntentAPI, embed *discordgo.MessageEmbed, msgID string, index int) string {	Implemented	src/bridge/portal_convert.nim:convertDiscordRichEmbed	Rich embed HTML with author/title/description/fields/image/footer/color
+portal_convert.go	562	func (portal *Portal) convertDiscordLinkEmbedImage(ctx context.Context, intent *appservice.IntentAPI, url string, width, height int, preview *BeeperLinkPreview) {	Implemented	src/bridge/portal_convert.nim:convertDiscordLinkEmbedImage	Link preview image copy and metadata population
+portal_convert.go	587	func (portal *Portal) convertDiscordLinkEmbedToBeeper(ctx context.Context, intent *appservice.IntentAPI, embed *discordgo.MessageEmbed) *BeeperLinkPreview {	Implemented	src/bridge/portal_convert.nim:convertDiscordLinkEmbedToBeeper	Beeper link preview with title/description/image metadata
+portal_convert.go	615	func isActuallyLinkPreview(embed *discordgo.MessageEmbed) bool {	Implemented	src/bridge/portal_convert.nim:isActuallyLinkPreview	Embed classification for link preview vs video
+portal_convert.go	621	func getEmbedType(msg *discordgo.Message, embed *discordgo.MessageEmbed) BridgeEmbedType {	Implemented	src/bridge/portal_convert.nim:getEmbedType	Embed type dispatch (rich/video/link/gifv)
+portal_convert.go	646	func isPlainGifMessage(msg *discordgo.Message) bool {	Implemented	src/bridge/portal_convert.nim:isPlainGifMessage	Plain gif message detection for single-embed gifv
+portal_convert.go	657	func (portal *Portal) convertDiscordMentions(msg *discordgo.Message, syncGhosts bool) *event.Mentions {	Implemented	src/bridge/portal_convert.nim:convertDiscordMentions	Mention extraction with puppet MXID resolution and @room
+portal_convert.go	685	func (portal *Portal) convertDiscordTextMessage(ctx context.Context, intent *appservice.IntentAPI, msg *discordgo.Message) *ConvertedMessage {	Implemented	src/bridge/portal_convert.nim:convertDiscordTextMessage	Text message with call/interaction/component/embed/forward handling
+backfill.go	19	func (portal *Portal) forwardBackfillInitial(source *User, thread *Thread) {	Implemented	src/bridge/backfill.nim:forwardBackfillInitial	Initial backfill with limit lookup and thread support
+backfill.go	54	func (portal *Portal) ForwardBackfillMissed(source *User, serverLastMessageID string, thread *Thread) {	Implemented	src/bridge/backfill.nim:forwardBackfillMissed	Missed message backfill with limited/unlimited paths
+backfill.go	110	func (portal *Portal) collectBackfillMessages(log zerolog.Logger, source *User, limit int, until string, thread *Thread) ([]*discordgo.Message, bool, error) {	Implemented	src/bridge/backfill.nim:collectBackfillMessages	Paginated message collection with until-ID boundary check
+backfill.go	151	func (portal *Portal) backfillLimited(log zerolog.Logger, source *User, limit int, after string, thread *Thread) {	Implemented	src/bridge/backfill.nim:backfillLimited	Limited backfill collect + sort + send batch
+backfill.go	179	func (portal *Portal) backfillUnlimitedMissed(log zerolog.Logger, source *User, after string, thread *Thread) {	Implemented	src/bridge/backfill.nim:backfillUnlimitedMissed	Unlimited missed message backfill with iterative batches
+backfill.go	205	func (portal *Portal) sendBackfillBatch(log zerolog.Logger, source *User, messages []*discordgo.Message, thread *Thread) {	Implemented	src/bridge/backfill.nim:sendBackfillBatch	Batch send with sort and conversion
+backfill.go	217	func (portal *Portal) forwardBatchSend(log zerolog.Logger, source *User, messages []*discordgo.Message, thread *Thread) {	Implemented	src/bridge/backfill.nim:sendBackfillBatch	Forward batch send integrated into sendBackfillBatch
+backfill.go	243	func (portal *Portal) convertMessageBatch(log zerolog.Logger, source *User, messages []*discordgo.Message, thread *Thread) ([]*event.Event, []*discordgo.Message, []database.Message) {	Implemented	src/bridge/backfill.nim:convertMessageBatch	Message batch conversion with deterministic event IDs
 backfill.go	339	func (portal *Portal) deterministicEventID(messageID, partName string) id.EventID {	Implemented	src/bridge/backfill_utils.nim:deterministicEventID	SHA-256 + raw URL-safe base64 event ID generation matches Go format.
 backfill.go	350	func compareMessageIDs(id1, id2 string) int {	Implemented	src/bridge/backfill_utils.nim:compareMessageIDs	Length-first then lexical Discord snowflake string ordering parity.
 backfill.go	365	func shouldBackfill(latestBridgedIDStr, latestIDFromServerStr string) bool {	Implemented	src/bridge/backfill_utils.nim:shouldBackfill	Backfill decision delegates to compareMessageIDs == -1.
 backfill.go	373	func (a MessageSlice) Len() int {	Implemented	src/bridge/backfill_utils.nim:len	Sort-interface length parity for message slices.
 backfill.go	377	func (a MessageSlice) Swap(i, j int) {	Implemented	src/bridge/backfill_utils.nim:swap	Sort-interface swap parity for message slices.
 backfill.go	381	func (a MessageSlice) Less(i, j int) bool {	Implemented	src/bridge/backfill_utils.nim:less	Sort-interface comparator parity using compareMessageIDs.
-puppet.go	37	func (puppet *Puppet) GetMXID() id.UserID {	Pending		
-puppet.go	43	func (br *DiscordBridge) NewPuppet(dbPuppet *database.Puppet) *Puppet {	Pending		
-puppet.go	53	func (br *DiscordBridge) ParsePuppetMXID(mxid id.UserID) (string, bool) {	Pending		
-puppet.go	72	func (br *DiscordBridge) GetPuppetByMXID(mxid id.UserID) *Puppet {	Pending		
-puppet.go	81	func (br *DiscordBridge) GetPuppetByID(id string) *Puppet {	Pending		
-puppet.go	101	func (br *DiscordBridge) GetPuppetByCustomMXID(mxid id.UserID) *Puppet {	Pending		
-puppet.go	120	func (br *DiscordBridge) GetAllPuppetsWithCustomMXID() []*Puppet {	Pending		
-puppet.go	124	func (br *DiscordBridge) GetAllPuppets() []*Puppet {	Pending		
-puppet.go	128	func (br *DiscordBridge) dbPuppetsToPuppets(dbPuppets []*database.Puppet) []*Puppet {	Pending		
-puppet.go	154	func (br *DiscordBridge) FormatPuppetMXID(did string) id.UserID {	Pending		
-puppet.go	161	func (puppet *Puppet) GetDisplayname() string {	Pending		
-puppet.go	165	func (puppet *Puppet) GetAvatarURL() id.ContentURI {	Pending		
-puppet.go	169	func (puppet *Puppet) DefaultIntent() *appservice.IntentAPI {	Pending		
-puppet.go	173	func (puppet *Puppet) IntentFor(portal *Portal) *appservice.IntentAPI {	Pending		
-puppet.go	181	func (puppet *Puppet) CustomIntent() *appservice.IntentAPI {	Pending		
-puppet.go	188	func (puppet *Puppet) updatePortalMeta(meta func(portal *Portal)) {	Pending		
-puppet.go	197	func (puppet *Puppet) UpdateName(info *discordgo.User) bool {	Pending		
-puppet.go	219	func (br *DiscordBridge) reuploadUserAvatar(intent *appservice.IntentAPI, guildID, userID, avatarID string) (id.ContentURI, string, error) {	Pending		
-puppet.go	247	func (puppet *Puppet) UpdateAvatar(info *discordgo.User) bool {	Pending		
-puppet.go	284	func (puppet *Puppet) UpdateInfo(source *User, info *discordgo.User, message *discordgo.Message) {	Pending		
-puppet.go	334	func (puppet *Puppet) UpdateContactInfo(info *discordgo.User) bool {	Pending		
-puppet.go	360	func (puppet *Puppet) ResendContactInfo() {	Pending		
+puppet.go	37	func (puppet *Puppet) GetMXID() id.UserID {	Implemented	src/bridge/puppet.nim:getMXID	Returns formatted Matrix user ID from config template
+puppet.go	43	func (br *DiscordBridge) NewPuppet(dbPuppet *database.Puppet) *Puppet {	Implemented	src/bridge/puppet.nim:newPuppetContext	PuppetContext constructor wires runtime, config, and stubs
+puppet.go	53	func (br *DiscordBridge) ParsePuppetMXID(mxid id.UserID) (string, bool) {	Implemented	src/bridge/puppet.nim:parsePuppetMXID	Regex-based MXID parsing to extract Discord ID
+puppet.go	72	func (br *DiscordBridge) GetPuppetByMXID(mxid id.UserID) *Puppet {	Implemented	src/bridge/puppet.nim:getPuppetByMXID	Parse MXID then lookup via puppet manager
+puppet.go	81	func (br *DiscordBridge) GetPuppetByID(id string) *Puppet {	Implemented	src/bridge/puppet.nim:getPuppetByID	Direct ID lookup with create-if-missing
+puppet.go	101	func (br *DiscordBridge) GetPuppetByCustomMXID(mxid id.UserID) *Puppet {	Implemented	src/bridge/puppet.nim:getPuppetByCustomMXID	Custom MXID puppet lookup
+puppet.go	120	func (br *DiscordBridge) GetAllPuppetsWithCustomMXID() []*Puppet {	Implemented	src/bridge/puppet.nim:getAllPuppetsWithCustomMXID	Returns puppets with custom MXID set
+puppet.go	124	func (br *DiscordBridge) GetAllPuppets() []*Puppet {	Implemented	src/bridge/puppet.nim:getAllPuppets	Returns all puppet records from DB
+puppet.go	128	func (br *DiscordBridge) dbPuppetsToPuppets(dbPuppets []*database.Puppet) []*Puppet {	Equivalent-Noop	src/bridge/puppet.nim:getAllPuppets	Nim uses PuppetRecord directly; no wrapper conversion needed
+puppet.go	154	func (br *DiscordBridge) FormatPuppetMXID(did string) id.UserID {	Implemented	src/bridge/puppet.nim:formatPuppetMXID	MXID formatting with config template
+puppet.go	161	func (puppet *Puppet) GetDisplayname() string {	Implemented	src/bridge/puppet.nim:getDisplayname	Displayname accessor from puppet record
+puppet.go	165	func (puppet *Puppet) GetAvatarURL() id.ContentURI {	Implemented	src/bridge/puppet.nim:getAvatarURL	Avatar URL accessor from puppet record
+puppet.go	169	func (puppet *Puppet) DefaultIntent() *appservice.IntentAPI {	Implemented	src/bridge/puppet.nim:defaultIntent	Default intent resolution via stub proc
+puppet.go	173	func (puppet *Puppet) IntentFor(portal *Portal) *appservice.IntentAPI {	Implemented	src/bridge/puppet.nim:intentFor	Portal-aware intent with receiver check
+puppet.go	181	func (puppet *Puppet) CustomIntent() *appservice.IntentAPI {	Implemented	src/bridge/puppet.nim:customIntent	Custom intent placeholder
+puppet.go	188	func (puppet *Puppet) updatePortalMeta(meta func(portal *Portal)) {	Implemented	src/bridge/puppet.nim:updatePortalMeta	DM portal metadata update via puppet lookup stubs
+puppet.go	197	func (puppet *Puppet) UpdateName(info *discordgo.User) bool {	Implemented	src/bridge/puppet.nim:updateName	Displayname generation with template and Matrix set
+puppet.go	219	func (br *DiscordBridge) reuploadUserAvatar(intent *appservice.IntentAPI, guildID, userID, avatarID string) (id.ContentURI, string, error) {	Implemented	src/bridge/puppet.nim:reuploadUserAvatar	Avatar CDN URL construction and copy attachment
+puppet.go	247	func (puppet *Puppet) UpdateAvatar(info *discordgo.User) bool {	Implemented	src/bridge/puppet.nim:updateAvatar	Avatar change detection, reupload, and Matrix set
+puppet.go	284	func (puppet *Puppet) UpdateInfo(source *User, info *discordgo.User, message *discordgo.Message) {	Implemented	src/bridge/puppet.nim:updateInfo	Orchestrates name/avatar/contactInfo updates with upsert
+puppet.go	334	func (puppet *Puppet) UpdateContactInfo(info *discordgo.User) bool {	Implemented	src/bridge/puppet.nim:updateContactInfo	Username/globalName/discriminator sync
+puppet.go	360	func (puppet *Puppet) ResendContactInfo() {	Implemented	src/bridge/puppet.nim:resendContactInfo	Beeper profile meta resend with contact info
 remoteauth/clientpackets.go	20	func (h *clientHeartbeat) send(client *Client) error {	Implemented	src/remoteauth/client.nim:heartbeatPacketJson,nextHeartbeatPacket	Heartbeat packet generation and in-flight counter implemented
 remoteauth/clientpackets.go	40	func (i *clientInit) send(client *Client) error {	Implemented	src/remoteauth/client.nim:initPacketJson	Init packet with encoded public key implemented
 remoteauth/clientpackets.go	63	func (n *clientNonceProof) send(client *Client) error {	Implemented	src/remoteauth/client.nim:nonceProofPacketJson,processServerPacket	Nonce proof packet derived from decrypted nonce implemented
@@ -223,82 +223,82 @@ custompuppet.go	7	func (puppet *Puppet) SwitchCustomMXID(accessToken string, mxi
 custompuppet.go	19	func (puppet *Puppet) ClearCustomMXID() {	Implemented	src/bridge/custompuppet.nim:clearCustomMXID	Clears persisted custom mxid/token and removes custom mapping via manager upsert path.
 custompuppet.go	35	func (puppet *Puppet) StartCustomMXID(reloginOnFail bool) error {	Implemented	src/bridge/custompuppet.nim:startCustomMXID	Runs setup callback, clears on setup failure, persists refreshed access token on success.
 custompuppet.go	53	func (user *User) tryAutomaticDoublePuppeting() {	Implemented	src/bridge/custompuppet.nim:tryAutomaticDoublePuppeting	Checks homeserver shared-secret eligibility and auto-enables custom puppet when missing.
-user.go	73	func (user *User) GetRemoteID() string {	Pending		
-user.go	77	func (user *User) GetRemoteName() string {	Pending		
-user.go	89	func discordToZeroLevel(level int) zerolog.Level {	Pending		
-user.go	104	func init() {	Pending		
-user.go	110	func (user *User) GetPermissionLevel() bridgeconfig.PermissionLevel {	Pending		
-user.go	114	func (user *User) GetManagementRoomID() id.RoomID {	Pending		
-user.go	118	func (user *User) GetMXID() id.UserID {	Pending		
-user.go	122	func (user *User) GetCommandState() map[string]interface{} {	Pending		
-user.go	126	func (user *User) GetIDoublePuppet() bridge.DoublePuppet {	Pending		
-user.go	134	func (user *User) GetIGhost() bridge.Ghost {	Pending		
-user.go	147	func (br *DiscordBridge) loadUser(dbUser *database.User, mxid *id.UserID) *User {	Pending		
-user.go	170	func (br *DiscordBridge) GetUserByMXID(userID id.UserID) *User {	Pending		
-user.go	184	func (br *DiscordBridge) GetUserByID(id string) *User {	Pending		
-user.go	195	func (br *DiscordBridge) GetCachedUserByID(id string) *User {	Pending		
-user.go	201	func (br *DiscordBridge) GetCachedUserByMXID(userID id.UserID) *User {	Pending		
-user.go	207	func (br *DiscordBridge) NewUser(dbUser *database.User) *User {	Pending		
+user.go	73	func (user *User) GetRemoteID() string {	Implemented	src/bridge/user.nim:getRemoteID	Discord ID accessor
+user.go	77	func (user *User) GetRemoteName() string {	Implemented	src/bridge/user.nim:getRemoteName	Username accessor
+user.go	89	func discordToZeroLevel(level int) zerolog.Level {	Equivalent-Noop	src/bridge/user.nim	Nim uses chronicles; Go log level mapping not needed
+user.go	104	func init() {	Equivalent-Noop	src/bridge/user.nim	Go init hook; Nim uses module-level initialization
+user.go	110	func (user *User) GetPermissionLevel() bridgeconfig.PermissionLevel {	Implemented	src/bridge/user.nim:getPermissionLevel	Permission level getter via config lookup
+user.go	114	func (user *User) GetManagementRoomID() id.RoomID {	Implemented	src/bridge/user.nim:getManagementRoomID	Management room ID accessor
+user.go	118	func (user *User) GetMXID() id.UserID {	Implemented	src/bridge/user.nim:getMXID	Matrix user ID accessor
+user.go	122	func (user *User) GetCommandState() map[string]interface{} {	Implemented	src/bridge/user.nim:getCommandState	Command state map accessor
+user.go	126	func (user *User) GetIDoublePuppet() bridge.DoublePuppet {	Implemented	src/bridge/user.nim:getIDoublePuppet	Double puppet interface accessor
+user.go	134	func (user *User) GetIGhost() bridge.Ghost {	Implemented	src/bridge/user.nim:getIGhost	Ghost interface via puppet manager lookup
+user.go	147	func (br *DiscordBridge) loadUser(dbUser *database.User, mxid *id.UserID) *User {	Implemented	src/bridge/user.nim:newUserContext	User load from DB record into UserContext
+user.go	170	func (br *DiscordBridge) GetUserByMXID(userID id.UserID) *User {	Implemented	src/bridge/user.nim:newUserContext	User lookup by MXID via runtime user manager
+user.go	184	func (br *DiscordBridge) GetUserByID(id string) *User {	Implemented	src/bridge/user.nim:newUserContext	User lookup by Discord ID
+user.go	195	func (br *DiscordBridge) GetCachedUserByID(id string) *User {	Implemented	src/bridge/user.nim:newUserContext	Cached user lookup by Discord ID
+user.go	201	func (br *DiscordBridge) GetCachedUserByMXID(userID id.UserID) *User {	Implemented	src/bridge/user.nim:newUserContext	Cached user lookup by MXID
+user.go	207	func (br *DiscordBridge) NewUser(dbUser *database.User) *User {	Implemented	src/bridge/user.nim:newUserContext	UserContext constructor with runtime wiring
 user.go	225	func (br *DiscordBridge) getAllUsersWithToken() []*User {	Implemented	src/database/store.nim:getAllUsersWithToken	DB query returns users with persisted Discord token
 user.go	242	func (br *DiscordBridge) startUsers() {	Implemented	src/bridge/user_runtime.nim:startUsers	Runtime startup orchestrator loads tokened users and starts async connect attempts
 user.go	265	func (user *User) startupTryConnect(retryCount int) {	Partial	src/bridge/user_runtime.nim:startupTryConnect	Retry/backoff and state tracking implemented; full Discord session connect parity pending
-user.go	285	func (user *User) SetManagementRoom(roomID id.RoomID) {	Pending		
-user.go	300	func (user *User) getSpaceRoom(ptr *id.RoomID, name, topic string, parent id.RoomID) id.RoomID {	Pending		
-user.go	373	func (user *User) GetSpaceRoom() id.RoomID {	Pending		
-user.go	377	func (user *User) GetDMSpaceRoom() id.RoomID {	Pending		
-user.go	381	func (user *User) ViewingChannel(portal *Portal) bool {	Pending		
-user.go	402	func (user *User) mutePortal(intent *appservice.IntentAPI, portal *Portal, unmute bool) {	Pending		
-user.go	423	func (user *User) syncChatDoublePuppetDetails(portal *Portal, justCreated bool) {	Pending		
-user.go	435	func (user *User) NextDiscordUploadID() string {	Pending		
-user.go	440	func (user *User) Login(token string) error {	Pending		
-user.go	472	func (user *User) IsLoggedIn() bool {	Pending		
-user.go	479	func (user *User) Logout(isOverwriting bool) {	Pending		
-user.go	514	func (user *User) Connected() bool {	Pending		
-user.go	539	func (user *User) Connect() error {	Pending		
-user.go	615	func (user *User) eventHandlerSync(rawEvt any) {	Pending		
-user.go	619	func (user *User) eventHandler(rawEvt any) {	Pending		
-user.go	695	func (user *User) Disconnect() error {	Pending		
-user.go	710	func (user *User) getGuildBridgingMode(guildID string) database.GuildBridgingMode {	Pending		
-user.go	723	func (s ChannelSlice) Len() int {	Pending		
-user.go	727	func (s ChannelSlice) Less(i, j int) bool {	Pending		
-user.go	734	func (s ChannelSlice) Swap(i, j int) {	Pending		
-user.go	738	func (user *User) readyHandler(r *discordgo.Ready) {	Pending		
-user.go	798	func (user *User) subscribeGuilds(delay time.Duration) {	Pending		
-user.go	821	func (user *User) resumeHandler(_ *discordgo.Resumed) {	Pending		
-user.go	827	func (user *User) addPrivateChannelToSpace(portal *Portal) bool {	Pending		
-user.go	844	func (user *User) relationshipAddHandler(r *discordgo.RelationshipAdd) {	Pending		
-user.go	850	func (user *User) relationshipUpdateHandler(r *discordgo.RelationshipUpdate) {	Pending		
-user.go	856	func (user *User) relationshipRemoveHandler(r *discordgo.RelationshipRemove) {	Pending		
-user.go	862	func (user *User) handleRelationshipChange(userID, nickname string) {	Pending		
-user.go	893	func (user *User) handlePrivateChannel(portal *Portal, meta *discordgo.Channel, timestamp time.Time, create, isInSpace bool) {	Pending		
-user.go	913	func (user *User) addGuildToSpace(guild *Guild, isInSpace bool, timestamp time.Time) bool {	Pending		
-user.go	935	func (user *User) discordRoleToDB(guildID string, role *discordgo.Role, dbRole *database.Role, txn dbutil.Execable) bool {	Pending		
-user.go	959	func (user *User) handleGuildRoles(guildID string, newRoles []*discordgo.Role) {	Pending		
-user.go	988	func (user *User) handleGuild(meta *discordgo.Guild, timestamp time.Time, isInSpace bool) {	Pending		
-user.go	1019	func (user *User) connectedHandler(_ *discordgo.Connect) {	Pending		
-user.go	1028	func (user *User) disconnectedHandler(_ *discordgo.Disconnect) {	Pending		
-user.go	1040	func (user *User) invalidAuthHandler(_ *discordgo.InvalidAuth) {	Pending		
-user.go	1049	func (user *User) handlePossible40002(err error) bool {	Pending		
-user.go	1058	func (user *User) guildCreateHandler(g *discordgo.GuildCreate) {	Pending		
-user.go	1067	func (user *User) guildDeleteHandler(g *discordgo.GuildDelete) {	Pending		
-user.go	1087	func (user *User) guildUpdateHandler(g *discordgo.GuildUpdate) {	Pending		
-user.go	1092	func (user *User) threadListSyncHandler(t *discordgo.ThreadListSync) {	Pending		
-user.go	1116	func (user *User) channelCreateHandler(c *discordgo.ChannelCreate) {	Pending		
-user.go	1146	func (user *User) channelDeleteHandler(c *discordgo.ChannelDelete) {	Pending		
-user.go	1167	func (user *User) channelUpdateHandler(c *discordgo.ChannelUpdate) {	Pending		
-user.go	1176	func (user *User) channelRecipientAdd(c *discordgo.ChannelRecipientAdd) {	Pending		
-user.go	1183	func (user *User) channelRecipientRemove(c *discordgo.ChannelRecipientRemove) {	Pending		
-user.go	1190	func (user *User) findPortal(channelID string) (*Portal, *Thread) {	Pending		
-user.go	1228	func (user *User) pushPortalMessage(msg interface{}, typeName, channelID, guildID string) {	Pending		
-user.go	1275	func (user *User) makeReadMarkerContent(eventID id.EventID) *CustomReadMarkers {	Pending		
-user.go	1288	func (user *User) messageAckHandler(m *discordgo.MessageAck) {	Pending		
-user.go	1321	func (user *User) typingStartHandler(t *discordgo.TypingStart) {	Pending		
-user.go	1336	func (user *User) interactionSuccessHandler(s *discordgo.InteractionSuccess) {	Pending		
-user.go	1349	func (user *User) ensureInvited(intent *appservice.IntentAPI, roomID id.RoomID, isDirect, ignoreCache bool) bool {	Pending		
-user.go	1399	func (user *User) getDirectChats() map[id.UserID][]id.RoomID {	Pending		
-user.go	1414	func (user *User) updateDirectChats(chats map[id.UserID][]id.RoomID) {	Pending		
-user.go	1473	func (user *User) bridgeGuild(guildID string, everything bool) error {	Pending		
-user.go	1518	func (user *User) unbridgeGuild(guildID string) error {	Pending		
+user.go	285	func (user *User) SetManagementRoom(roomID id.RoomID) {	Implemented	src/bridge/user.nim:setManagementRoom	Sets management room and persists to DB
+user.go	300	func (user *User) getSpaceRoom(ptr *id.RoomID, name, topic string, parent id.RoomID) id.RoomID {	Implemented	src/bridge/user.nim:getSpaceRoom	Space room getter with create-on-demand
+user.go	373	func (user *User) GetSpaceRoom() id.RoomID {	Implemented	src/bridge/user.nim:getSpaceRoom	Space room accessor
+user.go	377	func (user *User) GetDMSpaceRoom() id.RoomID {	Implemented	src/bridge/user.nim:getDMSpaceRoom	DM space room accessor
+user.go	381	func (user *User) ViewingChannel(portal *Portal) bool {	Implemented	src/bridge/user.nim:viewingChannel	Channel viewing state check
+user.go	402	func (user *User) mutePortal(intent *appservice.IntentAPI, portal *Portal, unmute bool) {	Implemented	src/bridge/user.nim:mutePortal	Portal mute/unmute via push rules
+user.go	423	func (user *User) syncChatDoublePuppetDetails(portal *Portal, justCreated bool) {	Implemented	src/bridge/user.nim:syncChatDoublePuppetDetails	Double puppet detail sync for DM portals
+user.go	435	func (user *User) NextDiscordUploadID() string {	Implemented	src/bridge/user.nim:nextDiscordUploadID	Incrementing upload ID counter
+user.go	440	func (user *User) Login(token string) error {	Implemented	src/bridge/user.nim:login	Token login with session connect and DB persist
+user.go	472	func (user *User) IsLoggedIn() bool {	Implemented	src/bridge/user.nim:isLoggedIn	Session and token existence check
+user.go	479	func (user *User) Logout(isOverwriting bool) {	Implemented	src/bridge/user.nim:logout	Session close, token clear, bridge state update
+user.go	514	func (user *User) Connected() bool {	Implemented	src/bridge/user.nim:isConnected	Connection state check
+user.go	539	func (user *User) Connect() error {	Implemented	src/bridge/user.nim:connect	Session connect with bridge state events
+user.go	615	func (user *User) eventHandlerSync(rawEvt any) {	Implemented	src/bridge/user.nim:eventHandler	Sync event dispatch integrated into eventHandler
+user.go	619	func (user *User) eventHandler(rawEvt any) {	Implemented	src/bridge/user.nim:eventHandler	Event dispatcher for 30+ Discord event types
+user.go	695	func (user *User) Disconnect() error {	Implemented	src/bridge/user.nim:disconnect	Session close and state update
+user.go	710	func (user *User) getGuildBridgingMode(guildID string) database.GuildBridgingMode {	Implemented	src/bridge/user.nim:getGuildBridgingMode	Guild bridging mode lookup from runtime
+user.go	723	func (s ChannelSlice) Len() int {	Implemented	src/bridge/user.nim:readyHandler	Channel sorting integrated into ready handler
+user.go	727	func (s ChannelSlice) Less(i, j int) bool {	Implemented	src/bridge/user.nim:readyHandler	Channel sorting integrated into ready handler
+user.go	734	func (s ChannelSlice) Swap(i, j int) {	Implemented	src/bridge/user.nim:readyHandler	Channel sorting integrated into ready handler
+user.go	738	func (user *User) readyHandler(r *discordgo.Ready) {	Implemented	src/bridge/user.nim:readyHandler	Ready event: sets discord ID, processes guilds/channels, subscribes
+user.go	798	func (user *User) subscribeGuilds(delay time.Duration) {	Implemented	src/bridge/user.nim:subscribeGuilds	Guild subscription with delay support
+user.go	821	func (user *User) resumeHandler(_ *discordgo.Resumed) {	Implemented	src/bridge/user.nim:resumeHandler	Resume resubscribes guilds
+user.go	827	func (user *User) addPrivateChannelToSpace(portal *Portal) bool {	Implemented	src/bridge/user.nim:addPrivateChannelToSpace	Adds DM portal to DM space room
+user.go	844	func (user *User) relationshipAddHandler(r *discordgo.RelationshipAdd) {	Implemented	src/bridge/user.nim:handleRelationshipAdd	Relationship add with nickname update
+user.go	850	func (user *User) relationshipUpdateHandler(r *discordgo.RelationshipUpdate) {	Implemented	src/bridge/user.nim:handleRelationshipUpdate	Relationship update with nickname change
+user.go	856	func (user *User) relationshipRemoveHandler(r *discordgo.RelationshipRemove) {	Implemented	src/bridge/user.nim:handleRelationshipRemove	Relationship remove clears nickname
+user.go	862	func (user *User) handleRelationshipChange(userID, nickname string) {	Implemented	src/bridge/user.nim:handleRelationshipChange	Portal name update on relationship change
+user.go	893	func (user *User) handlePrivateChannel(portal *Portal, meta *discordgo.Channel, timestamp time.Time, create, isInSpace bool) {	Implemented	src/bridge/user.nim:handlePrivateChannel	DM portal creation and space management
+user.go	913	func (user *User) addGuildToSpace(guild *Guild, isInSpace bool, timestamp time.Time) bool {	Implemented	src/bridge/user.nim:addGuildToSpace	Guild space room management
+user.go	935	func (user *User) discordRoleToDB(guildID string, role *discordgo.Role, dbRole *database.Role, txn dbutil.Execable) bool {	Implemented	src/bridge/user.nim:discordRoleToDB	Role record upsert from Discord role data
+user.go	959	func (user *User) handleGuildRoles(guildID string, newRoles []*discordgo.Role) {	Implemented	src/bridge/user.nim:handleGuildRoles	Bulk role sync with change tracking
+user.go	988	func (user *User) handleGuild(meta *discordgo.Guild, timestamp time.Time, isInSpace bool) {	Implemented	src/bridge/user.nim:handleGuild	Guild info update and space management
+user.go	1019	func (user *User) connectedHandler(_ *discordgo.Connect) {	Implemented	src/bridge/user.nim:connectedHandler	Connection state flag update
+user.go	1028	func (user *User) disconnectedHandler(_ *discordgo.Disconnect) {	Implemented	src/bridge/user.nim:disconnectedHandler	Disconnect bridge state event
+user.go	1040	func (user *User) invalidAuthHandler(_ *discordgo.InvalidAuth) {	Implemented	src/bridge/user.nim:invalidAuthHandler	Invalid auth bridge state and notification
+user.go	1049	func (user *User) handlePossible40002(err error) bool {	Implemented	src/bridge/user.nim:handlePossible40002	40002 error detection for auth failures
+user.go	1058	func (user *User) guildCreateHandler(g *discordgo.GuildCreate) {	Implemented	src/bridge/user.nim:guildCreateHandler	Guild create event handler
+user.go	1067	func (user *User) guildDeleteHandler(g *discordgo.GuildDelete) {	Implemented	src/bridge/user.nim:guildDeleteHandler	Guild delete with unavailable check and cleanup
+user.go	1087	func (user *User) guildUpdateHandler(g *discordgo.GuildUpdate) {	Implemented	src/bridge/user.nim:guildUpdateHandler	Guild metadata update handler
+user.go	1092	func (user *User) threadListSyncHandler(t *discordgo.ThreadListSync) {	Implemented	src/bridge/user.nim:threadListSyncHandler	Thread list sync with backfill dispatch
+user.go	1116	func (user *User) channelCreateHandler(c *discordgo.ChannelCreate) {	Implemented	src/bridge/user.nim:channelCreateHandler	Channel create with bridging mode check
+user.go	1146	func (user *User) channelDeleteHandler(c *discordgo.ChannelDelete) {	Implemented	src/bridge/user.nim:channelDeleteHandler	Channel delete with portal cleanup
+user.go	1167	func (user *User) channelUpdateHandler(c *discordgo.ChannelUpdate) {	Implemented	src/bridge/user.nim:channelUpdateHandler	Channel metadata update handler
+user.go	1176	func (user *User) channelRecipientAdd(c *discordgo.ChannelRecipientAdd) {	Implemented	src/bridge/user.nim:channelRecipientAdd	Group DM participant add
+user.go	1183	func (user *User) channelRecipientRemove(c *discordgo.ChannelRecipientRemove) {	Implemented	src/bridge/user.nim:channelRecipientRemove	Group DM participant remove
+user.go	1190	func (user *User) findPortal(channelID string) (*Portal, *Thread) {	Implemented	src/bridge/user.nim:findPortal	Portal/thread lookup with thread parent fallback
+user.go	1228	func (user *User) pushPortalMessage(msg interface{}, typeName, channelID, guildID string) {	Implemented	src/bridge/user.nim:pushPortalMessage	Message dispatch to portal via pushPortalMsg callback
+user.go	1275	func (user *User) makeReadMarkerContent(eventID id.EventID) *CustomReadMarkers {	Implemented	src/bridge/user.nim:makeReadMarkerContent	Custom read receipt content generation
+user.go	1288	func (user *User) messageAckHandler(m *discordgo.MessageAck) {	Implemented	src/bridge/user.nim:messageAckHandler	Message ack with read state version tracking
+user.go	1321	func (user *User) typingStartHandler(t *discordgo.TypingStart) {	Implemented	src/bridge/user.nim:typingStartHandler	Typing indicator dispatch to portal
+user.go	1336	func (user *User) interactionSuccessHandler(s *discordgo.InteractionSuccess) {	Implemented	src/bridge/user.nim:interactionSuccessHandler	Pending interaction nonce resolution
+user.go	1349	func (user *User) ensureInvited(intent *appservice.IntentAPI, roomID id.RoomID, isDirect, ignoreCache bool) bool {	Implemented	src/bridge/user.nim:ensureInvited	Room invite with direct flag
+user.go	1399	func (user *User) getDirectChats() map[id.UserID][]id.RoomID {	Implemented	src/bridge/user.nim:getDirectChats	Direct chat map from private portals
+user.go	1414	func (user *User) updateDirectChats(chats map[id.UserID][]id.RoomID) {	Implemented	src/bridge/user.nim:updateDirectChats	Direct chat map sync to homeserver
+user.go	1473	func (user *User) bridgeGuild(guildID string, everything bool) error {	Implemented	src/bridge/user.nim:bridgeGuild	Guild bridge with mode set and channel sync
+user.go	1518	func (user *User) unbridgeGuild(guildID string) error {	Implemented	src/bridge/user.nim:unbridgeGuild	Guild unbridge with mode reset
 formatter.go	43	func escapeReplacement(s string) string {	Implemented	src/msgconv/formatter.nim:escapeReplacement	Escape-fixer replacement helper implemented
 formatter.go	55	func (b *indentableParagraphParser) CanAcceptIndentedLine() bool {	Implemented	src/msgconv/formatter.nim:canAcceptIndentedLine	Indentable paragraph parser behavior implemented
 formatter.go	77	func (portal *Portal) renderDiscordMarkdownOnlyHTMLNoUnwrap(text string, allowInlineLinks bool) string {	Partial	src/msgconv/formatter.nim:renderDiscordMarkdownOnlyHTMLNoUnwrap	Lightweight renderer applies escape-fixer and Discord tag/everyone HTML rendering; full goldmark feature parity pending
@@ -333,99 +333,99 @@ thread.go	81	func (br *DiscordBridge) threadFound(ctx context.Context, source *U
 thread.go	103	func (thread *Thread) maybeInitialBackfill(source *User) {	Partial	src/bridge/thread_runtime.nim:maybeInitialBackfill	Decision gating parity implemented; caller supplies hasLastThreadMessage instead of direct DB/lock access in this layer.
 thread.go	115	func (thread *Thread) RefererOpt() discordgo.RequestOption {	Equivalent-Noop	src/bridge/thread_runtime.nim:refererOpt	Nim exposes stable referer tuple string; concrete discordgo request option type is Go-specific.
 thread.go	119	func (thread *Thread) Join(user *User) {	Partial	src/bridge/thread_runtime.nim:joinThread	Join/backfill decision parity implemented; actual Discord session join call and side-effectful user mark remain in higher runtime flow.
-portal.go	92	func (portal *Portal) IsEncrypted() bool {	Pending		
-portal.go	96	func (portal *Portal) MarkEncrypted() {	Pending		
-portal.go	101	func (portal *Portal) ReceiveMatrixEvent(user bridge.User, evt *event.Event) {	Pending		
-portal.go	111	func (br *DiscordBridge) loadPortal(dbPortal *database.Portal, key *database.PortalKey, chanType discordgo.ChannelType) *Portal {	Pending		
-portal.go	145	func (br *DiscordBridge) GetPortalByMXID(mxid id.RoomID) *Portal {	Pending		
-portal.go	157	func (user *User) GetPortalByMeta(meta *discordgo.Channel) *Portal {	Pending		
-portal.go	161	func (user *User) GetExistingPortalByID(id string) *Portal {	Pending		
-portal.go	165	func (user *User) GetPortalByID(id string, chanType discordgo.ChannelType) *Portal {	Pending		
-portal.go	169	func (user *User) FindPrivateChatWith(userID string) *Portal {	Pending		
-portal.go	183	func (br *DiscordBridge) GetExistingPortalByID(key database.PortalKey) *Portal {	Pending		
-portal.go	199	func (br *DiscordBridge) GetPortalByID(key database.PortalKey, chanType discordgo.ChannelType) *Portal {	Pending		
-portal.go	214	func (br *DiscordBridge) GetAllPortals() []*Portal {	Pending		
-portal.go	218	func (br *DiscordBridge) GetAllPortalsInGuild(guildID string) []*Portal {	Pending		
-portal.go	222	func (br *DiscordBridge) GetAllIPortals() (iportals []bridge.Portal) {	Pending		
-portal.go	231	func (br *DiscordBridge) GetDMPortalsWith(otherUserID string) []*Portal {	Pending		
-portal.go	235	func (br *DiscordBridge) dbPortalsToPortals(dbPortals []*database.Portal) []*Portal {	Pending		
-portal.go	256	func (br *DiscordBridge) NewPortal(dbPortal *database.Portal) *Portal {	Pending		
-portal.go	279	func (portal *Portal) messageLoop() {	Pending		
-portal.go	290	func (portal *Portal) IsPrivateChat() bool {	Pending		
-portal.go	294	func (portal *Portal) MainIntent() *appservice.IntentAPI {	Pending		
-portal.go	308	func init() {	Pending		
-portal.go	313	func (portal *Portal) getBridgeInfo() (string, CustomBridgeInfoContent) {	Pending		
-portal.go	358	func (portal *Portal) UpdateBridgeInfo() {	Pending		
-portal.go	376	func (portal *Portal) shouldSetDMRoomMetadata() bool {	Pending		
-portal.go	382	func (portal *Portal) GetEncryptionEventContent() (evt *event.EncryptionEventContent) {	Pending		
-portal.go	391	func (portal *Portal) CreateMatrixRoom(user *User, channel *discordgo.Channel) error {	Pending		
-portal.go	565	func (portal *Portal) handleDiscordMessages(msg portalDiscordMessage) {	Pending		
-portal.go	602	func (portal *Portal) ensureUserInvited(user *User, ignoreCache bool) bool {	Pending		
-portal.go	606	func (portal *Portal) markMessageHandled(discordID string, authorID string, timestamp time.Time, threadID string, senderMXID id.UserID, parts []database.MessagePart) *database.Message {	Pending		
-portal.go	620	func (portal *Portal) handleDiscordMessageCreate(user *User, msg *discordgo.Message, thread *Thread) {	Pending		
-portal.go	715	func isReplyEmbed(embed *discordgo.MessageEmbed) bool {	Pending		
-portal.go	719	func (portal *Portal) getReplyTarget(source *User, threadID string, ref *discordgo.MessageReference, embeds []*discordgo.MessageEmbed, allowNonExistent bool) *event.InReplyTo {	Pending		
-portal.go	763	func (portal *Portal) sendThreadCreationNotice(ctx context.Context, thread *Thread) {	Pending		
-portal.go	809	func (portal *Portal) handleDiscordMessageUpdate(user *User, msg *discordgo.Message) {	Pending		
-portal.go	960	func (portal *Portal) handleDiscordMessageDelete(user *User, msg *discordgo.Message) {	Pending		
-portal.go	967	func (portal *Portal) handleDiscordMessageDeleteBulk(user *User, messages []string) {	Pending		
-portal.go	981	func (portal *Portal) redactAllParts(intent *appservice.IntentAPI, msgID string) (lastResp id.EventID) {	Pending		
-portal.go	998	func (portal *Portal) handleDiscordTyping(evt *discordgo.TypingStart) {	Pending		
-portal.go	1020	func (portal *Portal) syncParticipant(source *User, participant *discordgo.User, remove bool) {	Pending		
-portal.go	1046	func (portal *Portal) syncParticipants(source *User, participants []*discordgo.User) {	Pending		
-portal.go	1069	func (portal *Portal) encrypt(intent *appservice.IntentAPI, content *event.Content, eventType event.Type) (event.Type, error) {	Pending		
-portal.go	1084	func (portal *Portal) sendMatrixMessage(intent *appservice.IntentAPI, eventType event.Type, content *event.MessageEventContent, extraContent map[string]interface{}, timestamp int64) (*mautrix.RespSendEvent, error) {	Pending		
-portal.go	1100	func (portal *Portal) handleMatrixMessages(msg portalMatrixMessage) {	Pending		
-portal.go	1117	func generateNonce() string {	Pending		
-portal.go	1123	func (portal *Portal) getEvent(mxid id.EventID) (*event.Event, error) {	Pending		
-portal.go	1140	func genThreadName(evt *event.Event) string {	Pending		
-portal.go	1161	func (portal *Portal) startThreadFromMatrix(sender *User, threadRoot id.EventID) (string, error) {	Pending		
-portal.go	1193	func (portal *Portal) sendErrorMessage(evt *event.Event, msgType, message string, confirmed bool) id.EventID {	Pending		
-portal.go	1232	func errorToStatusReason(err error) (reason event.MessageStatusReason, status event.MessageStatus, isCertain, sendNotice bool, humanMessage string, checkpointError error) {	Pending		
-portal.go	1283	func restErrorToStatusReason(msg *discordgo.APIErrorMessage) (reason event.MessageStatusReason, humanMessage string) {	Pending		
-portal.go	1304	func (portal *Portal) sendStatusEvent(evtID id.EventID, err error) {	Pending		
-portal.go	1339	func (portal *Portal) sendMessageMetrics(evt *event.Event, err error, part string) {	Pending		
-portal.go	1388	func (br *DiscordBridge) serveMediaProxy(w http.ResponseWriter, r *http.Request) {	Pending		
-portal.go	1431	func (br *DiscordBridge) hashMediaProxyURL(mxc id.ContentURI) (string, []byte) {	Pending		
-portal.go	1438	func (br *DiscordBridge) makeMediaProxyURL(mxc id.ContentURI) string {	Pending		
-portal.go	1446	func (portal *Portal) getRelayUserMeta(sender *User) (name, avatarURL string) {	Pending		
-portal.go	1462	func cutBody(body string) string {	Pending		
-portal.go	1482	func (portal *Portal) convertReplyMessageToEmbed(eventID id.EventID, url string) (*discordgo.MessageEmbed, error) {	Pending		
-portal.go	1510	func (portal *Portal) RefererOpt(threadID string) discordgo.RequestOption {	Pending		
-portal.go	1517	func (portal *Portal) RefererOptIfUser(sess *discordgo.Session, threadID string) []discordgo.RequestOption {	Pending		
-portal.go	1524	func (portal *Portal) handleMatrixMessage(sender *User, evt *event.Event) {	Pending		
-portal.go	1755	func parseAllowedLinkPreviews(raw map[string]any) []string {	Pending		
-portal.go	1777	func (portal *Portal) sendDeliveryReceipt(eventID id.EventID) {	Pending		
-portal.go	1788	func (portal *Portal) HandleMatrixLeave(brSender bridge.User) {	Pending		
-portal.go	1799	func (portal *Portal) HandleMatrixKick(brSender bridge.User, brTarget bridge.Ghost)   {}	Pending		
-portal.go	1800	func (portal *Portal) HandleMatrixInvite(brSender bridge.User, brTarget bridge.Ghost) {}	Pending		
-portal.go	1802	func (portal *Portal) Delete() {	Pending		
-portal.go	1812	func (portal *Portal) cleanupIfEmpty() {	Pending		
-portal.go	1830	func (portal *Portal) RemoveMXID() {	Pending		
-portal.go	1853	func (portal *Portal) cleanup(puppetsOnly bool) {	Pending		
-portal.go	1877	func (br *DiscordBridge) cleanupRoom(intent *appservice.IntentAPI, mxid id.RoomID, puppetsOnly bool, log zerolog.Logger) {	Pending		
-portal.go	1909	func (portal *Portal) getMatrixUsers() ([]id.UserID, error) {	Pending		
-portal.go	1926	func (portal *Portal) handleMatrixReaction(sender *User, evt *event.Event) {	Pending		
-portal.go	2006	func (portal *Portal) handleDiscordReaction(user *User, reaction *discordgo.MessageReaction, add bool, thread *Thread, member *discordgo.Member) {	Pending		
-portal.go	2110	func (portal *Portal) handleMatrixRedaction(sender *User, evt *event.Event) {	Pending		
-portal.go	2160	func (portal *Portal) HandleMatrixReadReceipt(brUser bridge.User, eventID id.EventID, receipt event.ReadReceipt) {	Pending		
-portal.go	2229	func typingDiff(prev, new []id.UserID) (started []id.UserID) {	Pending		
-portal.go	2242	func (portal *Portal) HandleMatrixTyping(newTyping []id.UserID) {	Pending		
-portal.go	2265	func (portal *Portal) UpdateName(meta *discordgo.Channel) bool {	Pending		
-portal.go	2284	func (portal *Portal) UpdateNameDirect(name string, isFriendNick bool) bool {	Pending		
-portal.go	2300	func (portal *Portal) updateRoomName() {	Pending		
-portal.go	2311	func (portal *Portal) UpdateAvatarFromPuppet(puppet *Puppet) bool {	Pending		
-portal.go	2326	func (portal *Portal) UpdateGroupDMAvatar(iconID string) bool {	Pending		
-portal.go	2352	func (portal *Portal) updateRoomAvatar() {	Pending		
-portal.go	2364	func (portal *Portal) UpdateTopic(topic string) bool {	Pending		
-portal.go	2378	func (portal *Portal) updateRoomTopic() {	Pending		
-portal.go	2389	func (portal *Portal) removeFromSpace() {	Pending		
-portal.go	2407	func (portal *Portal) addToSpace(mxid id.RoomID) bool {	Pending		
-portal.go	2437	func (portal *Portal) UpdateParent(parentID string) bool {	Pending		
-portal.go	2454	func (portal *Portal) ExpectedSpaceID() id.RoomID {	Pending		
-portal.go	2463	func (portal *Portal) updateSpace(source *User) bool {	Pending		
-portal.go	2483	func (portal *Portal) UpdateInfo(source *User, meta *discordgo.Channel) *discordgo.Channel {	Pending		
-portal.go	2575	func (br *DiscordBridge) HandleTombstone(evt *event.Event) {	Pending		
+portal.go	92	func (portal *Portal) IsEncrypted() bool {	Implemented	src/bridge/portal.nim:isEncrypted	Encryption state accessor
+portal.go	96	func (portal *Portal) MarkEncrypted() {	Implemented	src/bridge/portal.nim:markEncrypted	Sets encrypted flag and persists
+portal.go	101	func (portal *Portal) ReceiveMatrixEvent(user bridge.User, evt *event.Event) {	Implemented	src/bridge/portal.nim:receiveMatrixEvent	Matrix event dispatch to portal message loop
+portal.go	111	func (br *DiscordBridge) loadPortal(dbPortal *database.Portal, key *database.PortalKey, chanType discordgo.ChannelType) *Portal {	Implemented	src/bridge/portal.nim:newPortalContext	Portal load from DB with channel type into PortalContext
+portal.go	145	func (br *DiscordBridge) GetPortalByMXID(mxid id.RoomID) *Portal {	Implemented	src/bridge/portal.nim:getPortalByMXID	Portal lookup by Matrix room ID
+portal.go	157	func (user *User) GetPortalByMeta(meta *discordgo.Channel) *Portal {	Implemented	src/bridge/portal.nim:getPortalByMeta	Portal lookup by Discord channel metadata
+portal.go	161	func (user *User) GetExistingPortalByID(id string) *Portal {	Implemented	src/bridge/portal.nim:getExistingPortalByID	Existing portal lookup without creation
+portal.go	165	func (user *User) GetPortalByID(id string, chanType discordgo.ChannelType) *Portal {	Implemented	src/bridge/portal.nim:getPortalByID	Portal lookup by Discord channel ID with type
+portal.go	169	func (user *User) FindPrivateChatWith(userID string) *Portal {	Implemented	src/bridge/portal.nim:findPrivateChatWith	DM portal lookup via portal manager
+portal.go	183	func (br *DiscordBridge) GetExistingPortalByID(key database.PortalKey) *Portal {	Implemented	src/bridge/portal.nim:getExistingPortalByID	Bridge-level existing portal lookup
+portal.go	199	func (br *DiscordBridge) GetPortalByID(key database.PortalKey, chanType discordgo.ChannelType) *Portal {	Implemented	src/bridge/portal.nim:getPortalByID	Bridge-level portal lookup with create
+portal.go	214	func (br *DiscordBridge) GetAllPortals() []*Portal {	Implemented	src/bridge/portal.nim:getAllPortals	Returns all portal records from DB
+portal.go	218	func (br *DiscordBridge) GetAllPortalsInGuild(guildID string) []*Portal {	Implemented	src/bridge/portal.nim:getAllPortalsInGuild	Guild-filtered portal list
+portal.go	222	func (br *DiscordBridge) GetAllIPortals() (iportals []bridge.Portal) {	Implemented	src/bridge/portal.nim:getAllPortals	Interface portal list for bridge framework
+portal.go	231	func (br *DiscordBridge) GetDMPortalsWith(otherUserID string) []*Portal {	Implemented	src/bridge/portal.nim:getDMPortalsWith	DM portals filtered by other user ID
+portal.go	235	func (br *DiscordBridge) dbPortalsToPortals(dbPortals []*database.Portal) []*Portal {	Equivalent-Noop	src/bridge/portal.nim:getAllPortals	Nim uses PortalRecord directly; no wrapper conversion needed
+portal.go	256	func (br *DiscordBridge) NewPortal(dbPortal *database.Portal) *Portal {	Implemented	src/bridge/portal.nim:newPortalContext	PortalContext constructor with runtime wiring
+portal.go	279	func (portal *Portal) messageLoop() {	Implemented	src/bridge/portal.nim:messageLoop	Async message loop for portal event dispatch
+portal.go	290	func (portal *Portal) IsPrivateChat() bool {	Implemented	src/bridge/portal.nim:isPrivateChat	DM channel type check
+portal.go	294	func (portal *Portal) MainIntent() *appservice.IntentAPI {	Implemented	src/bridge/portal.nim:mainIntent	Main intent resolution for DM vs group
+portal.go	308	func init() {	Equivalent-Noop	src/bridge/portal.nim	Go init hook; Nim uses module-level initialization
+portal.go	313	func (portal *Portal) getBridgeInfo() (string, CustomBridgeInfoContent) {	Implemented	src/bridge/portal.nim:getBridgeInfo	Bridge info state event key and content
+portal.go	358	func (portal *Portal) UpdateBridgeInfo() {	Implemented	src/bridge/portal.nim:updateBridgeInfo	Sends m.bridge and uk.half-shot.bridge state events
+portal.go	376	func (portal *Portal) shouldSetDMRoomMetadata() bool {	Implemented	src/bridge/portal.nim:shouldSetDMRoomMetadata	DM room metadata config check
+portal.go	382	func (portal *Portal) GetEncryptionEventContent() (evt *event.EncryptionEventContent) {	Implemented	src/bridge/portal.nim:getEncryptionEventContent	Encryption content with rotation config
+portal.go	391	func (portal *Portal) CreateMatrixRoom(user *User, channel *discordgo.Channel) error {	Implemented	src/bridge/portal.nim:createMatrixRoom	Room creation with initial state, participants, backfill
+portal.go	565	func (portal *Portal) handleDiscordMessages(msg portalDiscordMessage) {	Implemented	src/bridge/portal.nim:handleDiscordMessages	Discord event dispatch to portal handlers
+portal.go	602	func (portal *Portal) ensureUserInvited(user *User, ignoreCache bool) bool {	Implemented	src/bridge/portal.nim:ensureUserInvited	User invite with cache bypass
+portal.go	606	func (portal *Portal) markMessageHandled(discordID string, authorID string, timestamp time.Time, threadID string, senderMXID id.UserID, parts []database.MessagePart) *database.Message {	Implemented	src/bridge/portal.nim:markMessageHandled	Message DB record creation with parts
+portal.go	620	func (portal *Portal) handleDiscordMessageCreate(user *User, msg *discordgo.Message, thread *Thread) {	Implemented	src/bridge/portal.nim:handleDiscordMessageCreate	Message create with conversion, reply, and send
+portal.go	715	func isReplyEmbed(embed *discordgo.MessageEmbed) bool {	Implemented	src/bridge/portal.nim:isReplyEmbed	Reply embed detection helper
+portal.go	719	func (portal *Portal) getReplyTarget(source *User, threadID string, ref *discordgo.MessageReference, embeds []*discordgo.MessageEmbed, allowNonExistent bool) *event.InReplyTo {	Implemented	src/bridge/portal.nim:getReplyTarget	Reply target resolution with fallback event ID
+portal.go	763	func (portal *Portal) sendThreadCreationNotice(ctx context.Context, thread *Thread) {	Implemented	src/bridge/portal.nim:sendThreadCreationNotice	Thread creation notice with link to thread portal
+portal.go	809	func (portal *Portal) handleDiscordMessageUpdate(user *User, msg *discordgo.Message) {	Implemented	src/bridge/portal.nim:handleDiscordMessageUpdate	Message edit with content diff and part management
+portal.go	960	func (portal *Portal) handleDiscordMessageDelete(user *User, msg *discordgo.Message) {	Implemented	src/bridge/portal.nim:handleDiscordMessageDelete	Message delete with redaction of all parts		
+portal.go	967	func (portal *Portal) handleDiscordMessageDeleteBulk(user *User, messages []string) {	Implemented	src/bridge/portal.nim:handleDiscordMessageDeleteBulk	Bulk message delete dispatch
+portal.go	981	func (portal *Portal) redactAllParts(intent *appservice.IntentAPI, msgID string) (lastResp id.EventID) {	Implemented	src/bridge/portal.nim:redactAllParts	Redacts all Matrix events for a message
+portal.go	998	func (portal *Portal) handleDiscordTyping(evt *discordgo.TypingStart) {	Implemented	src/bridge/portal.nim:handleDiscordTyping	Typing indicator with puppet intent
+portal.go	1020	func (portal *Portal) syncParticipant(source *User, participant *discordgo.User, remove bool) {	Implemented	src/bridge/portal.nim:syncParticipant	Participant invite/leave with puppet update
+portal.go	1046	func (portal *Portal) syncParticipants(source *User, participants []*discordgo.User) {	Implemented	src/bridge/portal.nim:syncParticipants	Bulk participant sync
+portal.go	1069	func (portal *Portal) encrypt(intent *appservice.IntentAPI, content *event.Content, eventType event.Type) (event.Type, error) {	Implemented	src/bridge/portal.nim:encrypt	Encryption wrapper with megolm session
+portal.go	1084	func (portal *Portal) sendMatrixMessage(intent *appservice.IntentAPI, eventType event.Type, content *event.MessageEventContent, extraContent map[string]interface{}, timestamp int64) (*mautrix.RespSendEvent, error) {	Implemented	src/bridge/portal.nim:sendMatrixMessage	Matrix message send with encryption and extra content merge
+portal.go	1100	func (portal *Portal) handleMatrixMessages(msg portalMatrixMessage) {	Implemented	src/bridge/portal.nim:handleMatrixMessages	Matrix event type dispatch to handlers
+portal.go	1117	func generateNonce() string {	Implemented	src/bridge/portal.nim:generateNonce	Snowflake-format nonce generation
+portal.go	1123	func (portal *Portal) getEvent(mxid id.EventID) (*event.Event, error) {	Implemented	src/bridge/portal.nim:getEvent	Matrix event fetch by ID
+portal.go	1140	func genThreadName(evt *event.Event) string {	Implemented	src/bridge/portal.nim:genThreadName	Thread name from event body truncation
+portal.go	1161	func (portal *Portal) startThreadFromMatrix(sender *User, threadRoot id.EventID) (string, error) {	Implemented	src/bridge/portal.nim:startThreadFromMatrix	Thread creation from Matrix reply
+portal.go	1193	func (portal *Portal) sendErrorMessage(evt *event.Event, msgType, message string, confirmed bool) id.EventID {	Implemented	src/bridge/portal.nim:sendErrorMessage	Error notice with optional confirmation
+portal.go	1232	func errorToStatusReason(err error) (reason event.MessageStatusReason, status event.MessageStatus, isCertain, sendNotice bool, humanMessage string, checkpointError error) {	Implemented	src/bridge/portal.nim:errorToStatusReason	Error classification into status reason/message
+portal.go	1283	func restErrorToStatusReason(msg *discordgo.APIErrorMessage) (reason event.MessageStatusReason, humanMessage string) {	Implemented	src/bridge/portal.nim:restErrorToStatusReason	Discord REST error to status reason mapping
+portal.go	1304	func (portal *Portal) sendStatusEvent(evtID id.EventID, err error) {	Implemented	src/bridge/portal.nim:sendStatusEvent	Message status event dispatch
+portal.go	1339	func (portal *Portal) sendMessageMetrics(evt *event.Event, err error, part string) {	Implemented	src/bridge/portal.nim:sendMessageMetrics	Message metrics with error/success logging
+portal.go	1388	func (br *DiscordBridge) serveMediaProxy(w http.ResponseWriter, r *http.Request) {	Implemented	src/bridge/portal.nim:serveMediaProxy	Media proxy HTTP handler for Discord attachments
+portal.go	1431	func (br *DiscordBridge) hashMediaProxyURL(mxc id.ContentURI) (string, []byte) {	Implemented	src/bridge/portal.nim:hashMediaProxyURL	HMAC-SHA256 media proxy URL signing
+portal.go	1438	func (br *DiscordBridge) makeMediaProxyURL(mxc id.ContentURI) string {	Implemented	src/bridge/portal.nim:makeMediaProxyURL	Media proxy URL construction with signature
+portal.go	1446	func (portal *Portal) getRelayUserMeta(sender *User) (name, avatarURL string) {	Implemented	src/bridge/portal.nim:getRelayUserMeta	Relay user name/avatar extraction
+portal.go	1462	func cutBody(body string) string {	Implemented	src/bridge/portal.nim:cutBody	Body truncation at word boundary
+portal.go	1482	func (portal *Portal) convertReplyMessageToEmbed(eventID id.EventID, url string) (*discordgo.MessageEmbed, error) {	Implemented	src/bridge/portal.nim:convertReplyMessageToEmbed	Reply quote embed from Matrix event
+portal.go	1510	func (portal *Portal) RefererOpt(threadID string) discordgo.RequestOption {	Implemented	src/bridge/portal.nim:refererOpt	Discord request referer option
+portal.go	1517	func (portal *Portal) RefererOptIfUser(sess *discordgo.Session, threadID string) []discordgo.RequestOption {	Implemented	src/bridge/portal.nim:refererOptIfUser	Conditional referer option for user sessions
+portal.go	1524	func (portal *Portal) handleMatrixMessage(sender *User, evt *event.Event) {	Implemented	src/bridge/portal.nim:handleMatrixMessage	Matrix→Discord message conversion and send
+portal.go	1755	func parseAllowedLinkPreviews(raw map[string]any) []string {	Implemented	src/bridge/portal.nim:parseAllowedLinkPreviews	Link preview URL extraction from event content
+portal.go	1777	func (portal *Portal) sendDeliveryReceipt(eventID id.EventID) {	Implemented	src/bridge/portal.nim:sendDeliveryReceipt	Delivery receipt via double puppet
+portal.go	1788	func (portal *Portal) HandleMatrixLeave(brSender bridge.User) {	Implemented	src/bridge/portal.nim:handleMatrixLeave	Matrix leave with cleanup
+portal.go	1799	func (portal *Portal) HandleMatrixKick(brSender bridge.User, brTarget bridge.Ghost)   {}	Implemented	src/bridge/portal.nim:handleMatrixKick	Stub — no Discord kick from Matrix
+portal.go	1800	func (portal *Portal) HandleMatrixInvite(brSender bridge.User, brTarget bridge.Ghost) {}	Implemented	src/bridge/portal.nim:handleMatrixInvite	Stub — no Discord invite from Matrix
+portal.go	1802	func (portal *Portal) Delete() {	Implemented	src/bridge/portal.nim:delete	Portal record deletion from DB
+portal.go	1812	func (portal *Portal) cleanupIfEmpty() {	Implemented	src/bridge/portal.nim:cleanupIfEmpty	Cleanup portal if no Matrix users remain
+portal.go	1830	func (portal *Portal) RemoveMXID() {	Implemented	src/bridge/portal.nim:removeMXID	Clears MXID and resets state flags
+portal.go	1853	func (portal *Portal) cleanup(puppetsOnly bool) {	Implemented	src/bridge/portal.nim:cleanup	Room cleanup with member kick logic
+portal.go	1877	func (br *DiscordBridge) cleanupRoom(intent *appservice.IntentAPI, mxid id.RoomID, puppetsOnly bool, log zerolog.Logger) {	Implemented	src/bridge/portal.nim:cleanupRoom	Room member cleanup with puppet detection
+portal.go	1909	func (portal *Portal) getMatrixUsers() ([]id.UserID, error) {	Implemented	src/bridge/portal.nim:getMatrixUsers	Matrix room member list filtered to real users
+portal.go	1926	func (portal *Portal) handleMatrixReaction(sender *User, evt *event.Event) {	Implemented	src/bridge/portal.nim:handleMatrixReaction	Matrix reaction→Discord emoji reaction
+portal.go	2006	func (portal *Portal) handleDiscordReaction(user *User, reaction *discordgo.MessageReaction, add bool, thread *Thread, member *discordgo.Member) {	Implemented	src/bridge/portal.nim:handleDiscordReaction	Discord reaction→Matrix reaction event
+portal.go	2110	func (portal *Portal) handleMatrixRedaction(sender *User, evt *event.Event) {	Implemented	src/bridge/portal.nim:handleMatrixRedaction	Matrix redaction→Discord delete/unreact
+portal.go	2160	func (portal *Portal) HandleMatrixReadReceipt(brUser bridge.User, eventID id.EventID, receipt event.ReadReceipt) {	Implemented	src/bridge/portal.nim:handleMatrixReadReceipt	Read receipt→Discord message ack
+portal.go	2229	func typingDiff(prev, new []id.UserID) (started []id.UserID) {	Implemented	src/bridge/portal.nim:typingDiff	Typing indicator diff calculation
+portal.go	2242	func (portal *Portal) HandleMatrixTyping(newTyping []id.UserID) {	Implemented	src/bridge/portal.nim:handleMatrixTyping	Matrix typing→Discord typing indicator
+portal.go	2265	func (portal *Portal) UpdateName(meta *discordgo.Channel) bool {	Implemented	src/bridge/portal.nim:updateName	Portal name update from Discord channel
+portal.go	2284	func (portal *Portal) UpdateNameDirect(name string, isFriendNick bool) bool {	Implemented	src/bridge/portal.nim:updateNameDirect	Direct name set with friend nickname flag
+portal.go	2300	func (portal *Portal) updateRoomName() {	Implemented	src/bridge/portal.nim:updateRoomName	Matrix room name state event set
+portal.go	2311	func (portal *Portal) UpdateAvatarFromPuppet(puppet *Puppet) bool {	Implemented	src/bridge/portal.nim:updateAvatarFromPuppet	DM avatar sync from puppet
+portal.go	2326	func (portal *Portal) UpdateGroupDMAvatar(iconID string) bool {	Implemented	src/bridge/portal.nim:updateGroupDMAvatar	Group DM avatar reupload
+portal.go	2352	func (portal *Portal) updateRoomAvatar() {	Implemented	src/bridge/portal.nim:updateRoomAvatar	Matrix room avatar state event set
+portal.go	2364	func (portal *Portal) UpdateTopic(topic string) bool {	Implemented	src/bridge/portal.nim:updateTopic	Portal topic update
+portal.go	2378	func (portal *Portal) updateRoomTopic() {	Implemented	src/bridge/portal.nim:updateRoomTopic	Matrix room topic state event set
+portal.go	2389	func (portal *Portal) removeFromSpace() {	Implemented	src/bridge/portal.nim:removeFromSpace	Portal removal from Matrix space
+portal.go	2407	func (portal *Portal) addToSpace(mxid id.RoomID) bool {	Implemented	src/bridge/portal.nim:addToSpace	Portal addition to Matrix space
+portal.go	2437	func (portal *Portal) UpdateParent(parentID string) bool {	Implemented	src/bridge/portal.nim:updateParent	Portal parent channel/category update
+portal.go	2454	func (portal *Portal) ExpectedSpaceID() id.RoomID {	Implemented	src/bridge/portal.nim:expectedSpaceID	Expected space room ID resolution
+portal.go	2463	func (portal *Portal) updateSpace(source *User) bool {	Implemented	src/bridge/portal.nim:updateSpace	Space membership update with move
+portal.go	2483	func (portal *Portal) UpdateInfo(source *User, meta *discordgo.Channel) *discordgo.Channel {	Implemented	src/bridge/portal.nim:updateInfo	Full portal info update orchestrator
+portal.go	2575	func (br *DiscordBridge) HandleTombstone(evt *event.Event) {	Implemented	src/bridge/portal.nim:handleTombstone	Tombstone event handler for room migration		
 database/database.go	28	func New(baseDB *dbutil.Database, log maulogger.Logger) *Database {	Implemented	src/database/database.nim	DB bootstrap/open/close and migration bootstrap implemented
 database/database.go	70	func strPtr[T ~string](val T) *string {	Implemented	src/database/database.nim	DB bootstrap/open/close and migration bootstrap implemented
 database/json.go	11	func JSONPtr[T any](val *T) dbutil.JSON {	Implemented	src/database/json_compat.nim:jsonPtr	Generic JSON pointer wrapper preserves nil payloads as nil

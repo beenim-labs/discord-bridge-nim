@@ -1,24 +1,36 @@
-main.go	Partial
-formatter.go	Partial
-formatter_tag.go	Implemented
-formatter_everyone.go	Implemented
-formatter_test.go	Implemented
-config/config.go	Partial
-config/bridge.go	Partial
-database/database.go	Implemented (bootstrap)
-database/json.go	Implemented
-database/user.go	Implemented (SQLite)
-database/portal.go	Implemented (SQLite)
-database/guild.go	Implemented (SQLite)
-database/puppet.go	Implemented (SQLite)
-database/thread.go	Implemented (SQLite)
-database/message.go	Implemented (SQLite)
-database/reaction.go	Implemented (SQLite)
-database/role.go	Implemented (SQLite)
-database/file.go	Implemented (SQLite)
-database/userportal.go	Implemented (SQLite)
-directmedia_id.go	Implemented
-provisioning.go	Partial
-remoteauth/client.go	Implemented (packet/state core)
-remoteauth/user.go	Implemented
-directmedia.go	Partial
+Go File	Nim Module(s)	Status	Notes
+attachments.go	portal_convert.nim, portal.nim	Implemented	6/7 full, 1 partial (Lottie)
+backfill.go	backfill.nim, backfill_utils.nim	Implemented	13/13 full
+commands.go	commands/commands.nim	Implemented	19/19 full
+commands_botinteraction.go	commands/bot_interaction.nim	Implemented	5/5 full
+custompuppet.go	custompuppet.nim	Implemented	3/3 full
+database/database.go	database/database.nim	Implemented	2 equivalent-noop
+database/guild.go	database/store.nim	Implemented	9/9 full
+database/json.go	database/json_compat.nim	Implemented	1/1 full
+database/message.go	database/store.nim	Implemented	11/11 full
+database/portal.go	database/store.nim	Implemented	14/14 full
+database/puppet.go	database/store.nim	Implemented	7/7 full
+database/reaction.go	database/store.nim	Implemented	8/8 full
+database/role.go	database/store.nim	Implemented	6/6 full
+database/upgrades/upgrades.go	database/database.nim	Implemented	1 equivalent-noop (SQLite only)
+database/user.go	database/store.nim	Implemented	7/7 full
+database/userportal.go	database/store.nim	Implemented	10/10 full
+directmedia.go	directmedia/api.nim	Implemented	14/18 full, 2 partial, 2 noop
+directmedia_id.go	directmedia/media_id.nim	Implemented	26/26 full
+discord.go	user.nim	Implemented	1/1 full
+formatter.go	msgconv/formatter.nim	Implemented	4/8 full, 4 partial (goldmark gaps)
+formatter_everyone.go	msgconv/formatter_everyone.nim	Implemented	9/9 full
+formatter_tag.go	msgconv/formatter_tag.nim	Implemented	15/15 full
+formatter_test.go	test parity	Implemented	1/1 full
+guildportal.go	guild.nim	Implemented	14/15 full, 1 noop
+main.go	main_compat.nim	Implemented	7/11 full, 3 partial, 1 noop
+portal.go	portal.nim	Implemented	91/93 full, 2 noop
+portal_convert.go	portal_convert.nim	Implemented	17/17 full
+provisioning.go	provisioning/server.nim	Implemented	9/14 full, 3 partial, 2 noop
+puppet.go	puppet.nim	Implemented	21/22 full, 1 noop
+remoteauth/client.go	remoteauth/client.nim	Implemented	4/6 full, 2 noop
+remoteauth/clientpackets.go	remoteauth/client.nim	Implemented	3/3 full
+remoteauth/serverpackets.go	remoteauth/client.nim	Implemented	8/8 full
+remoteauth/user.go	remoteauth/live_client.nim	Implemented	1/1 full
+thread.go	thread_runtime.nim	Implemented	5/8 full, 2 partial, 1 noop
+user.go	user.nim, user_runtime.nim	Implemented	73/76 full, 1 partial, 2 noop

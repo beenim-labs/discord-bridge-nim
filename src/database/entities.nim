@@ -1,6 +1,8 @@
 ## Bridge domain entities mapped from local Go schema.
 ## Query implementations will be expanded in parity milestones.
 
+import std/strutils
+
 type
   GuildBridgingMode* = enum
     gbmNothing
@@ -139,3 +141,25 @@ proc discordProtoChannelID*(rec: ReactionRecord): string =
     rec.threadId
   else:
     rec.channelId
+
+proc description*(mode: GuildBridgingMode): string =
+  case mode
+  of gbmNothing: "not bridging"
+  of gbmIfPortalExists: "portal exists"
+  of gbmCreateOnMessage: "create portal on message"
+  of gbmEverything: "bridging everything"
+
+proc modeString*(mode: GuildBridgingMode): string =
+  case mode
+  of gbmNothing: "nothing"
+  of gbmIfPortalExists: "if-portal-exists"
+  of gbmCreateOnMessage: "create-on-message"
+  of gbmEverything: "everything"
+
+proc parseGuildBridgingMode*(s: string): GuildBridgingMode =
+  case s.toLowerAscii()
+  of "nothing": gbmNothing
+  of "if-portal-exists": gbmIfPortalExists
+  of "create-on-message": gbmCreateOnMessage
+  of "everything": gbmEverything
+  else: gbmNothing  # GuildBridgeInvalid maps to Nothing as sentinel

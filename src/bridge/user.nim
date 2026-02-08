@@ -180,23 +180,6 @@ type
   SendWarningMsgProc*    = proc(roomId, msg: string) {.closure.}
 
 # ===========================================================================
-# RoleRecord — stored guild roles
-# ===========================================================================
-
-type
-  RoleRecord* = object
-    id*: string
-    guildId*: string
-    name*: string
-    icon*: string
-    mentionable*: bool
-    managed*: bool
-    hoist*: bool
-    color*: int
-    position*: int
-    permissions*: int64
-
-# ===========================================================================
 # UserContext — injectable context for user operations
 # ===========================================================================
 
