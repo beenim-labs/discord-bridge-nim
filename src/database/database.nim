@@ -32,6 +32,30 @@ proc runShell(command: string): tuple[ok: bool, output: string] =
 proc execSqlite(conn: SqliteConn, stmt: string): tuple[ok: bool, err: string] =
   conn.sqliteExec(stmt)
 
+proc sqliteHasColumn(
+    conn: SqliteConn;
+    tableName: string;
+    columnName: string): tuple[ok: bool, exists: bool, err: string] =
+  let queried = sqliteQuery(conn, "PRAGMA table_info(\"" & tableName & "\");")
+  if not queried.ok:
+    return (false, false, queried.err)
+  for row in queried.rows:
+    if row.len >= 2 and row[1] == columnName:
+      return (true, true, "")
+  (true, false, "")
+
+proc ensureSqliteColumn(
+    conn: SqliteConn;
+    tableName: string;
+    columnName: string;
+    columnDef: string): tuple[ok: bool, err: string] =
+  let hasCol = sqliteHasColumn(conn, tableName, columnName)
+  if not hasCol.ok:
+    return (false, "failed to inspect table " & tableName & ": " & hasCol.err)
+  if hasCol.exists:
+    return (true, "")
+  execSqlite(conn, "ALTER TABLE \"" & tableName & "\" ADD COLUMN " & columnDef & ";")
+
 proc applyLatestSqliteSchema*(dbPath: string): tuple[ok: bool, err: string] =
   let script = latestRevisionScript(dbSQLite)
   if script.path.len == 0:
@@ -57,6 +81,24 @@ proc applyLatestSqliteSchema*(dbPath: string): tuple[ok: bool, err: string] =
   if not tableCheck.ok:
     return (false, "failed to inspect schema: " & tableCheck.err)
   if tableCheck.rows.len > 0:
+    let ensureReadState = ensureSqliteColumn(
+      conn,
+      "user",
+      "read_state_version",
+      "read_state_version INTEGER NOT NULL DEFAULT 0",
+    )
+    if not ensureReadState.ok:
+      return (false, "failed to backfill read_state_version column: " & ensureReadState.err)
+
+    let ensureHeartbeat = ensureSqliteColumn(
+      conn,
+      "user",
+      "heartbeat_session",
+      "heartbeat_session jsonb",
+    )
+    if not ensureHeartbeat.ok:
+      return (false, "failed to backfill heartbeat_session column: " & ensureHeartbeat.err)
+
     return (true, "")
 
   let scriptText = readFile(script.path)
