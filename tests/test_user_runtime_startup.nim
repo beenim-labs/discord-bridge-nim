@@ -1,4 +1,4 @@
-import std/[asyncdispatch, json, os, times, unittest]
+import std/[asyncdispatch, json, os, strutils, times, unittest]
 import config/config
 import database/[database, store]
 import bridge/runtime
@@ -39,6 +39,11 @@ suite "user runtime startup":
       let cfg = loadConfig("tests/fixtures/mautrix-discord.sample.yaml")
       let rt = newDiscordBridgeRuntime(cfg, db)
       rt.userStartup.maxRetries = 0
+      rt.userStartup.verifyToken = proc(token: string): tuple[ok: bool, err: string] =
+        if token.startsWith("token-"):
+          (true, "")
+        else:
+          (false, "invalid token")
       rt.start()
       waitFor sleepAsync(120)
 
@@ -57,11 +62,13 @@ suite "user runtime startup":
     let dbPath = opened.path
     try:
       var u1 = newUserRecord("@stop:test")
-      u1.discordToken = "retry:5:token"
+      u1.discordToken = "bad-token"
       db.insertUser(u1)
 
       let cfg = loadConfig("tests/fixtures/mautrix-discord.sample.yaml")
       let rt = newDiscordBridgeRuntime(cfg, db)
+      rt.userStartup.verifyToken = proc(token: string): tuple[ok: bool, err: string] =
+        (false, "temporary error")
       rt.start()
       waitFor sleepAsync(40)
       rt.stop()

@@ -6,7 +6,18 @@ proc newTestApi(): ProvisioningApi =
   var cfg = defaultConfig()
   cfg.bridge.provisioning.prefix = "/_matrix/provision"
   cfg.bridge.provisioning.sharedSecret = "secret"
-  newProvisioningApi(cfg)
+  result = newProvisioningApi(cfg)
+  result.verifyDiscordToken = proc(token: string): tuple[
+    ok: bool,
+    discordId: string,
+    username: string,
+    discriminator: string,
+    err: string
+  ] =
+    if token.len == 0 or token == "bad":
+      (false, "", "", "", "invalid token")
+    else:
+      (true, "123", "alice", "0001", "")
 
 proc makeHeaders(authHeader = "Bearer secret", wsProtocol = ""): HttpHeaders =
   result = newHttpHeaders()
@@ -86,6 +97,28 @@ suite "provisioning":
     check not ping.payload["discord"]["logged_in"].getBool()
     check not ping.payload["discord"]["connected"].getBool()
     check ping.payload["discord"]["id"].getStr() == ""
+
+  test "token login reassigns existing discord id to current user":
+    let api = newTestApi()
+    let aliceQuery = "user_id=%40alice%3Alocalhost"
+    let bobQuery = "user_id=%40bob%3Alocalhost"
+
+    let aliceLogin = api.call(HttpPost, "/_matrix/provision/v1/login/token", query = aliceQuery, body = """{"token":"MTIz.abc.xyz"}""")
+    check aliceLogin.code == Http200
+
+    let bobLogin = api.call(HttpPost, "/_matrix/provision/v1/login/token", query = bobQuery, body = """{"token":"MTIz.abc.xyz"}""")
+    check bobLogin.code == Http200
+    check bobLogin.payload["id"].getStr() == "123"
+
+    let alicePing = api.call(HttpGet, "/_matrix/provision/v1/ping", query = aliceQuery)
+    check alicePing.code == Http200
+    check not alicePing.payload["discord"]["logged_in"].getBool()
+    check alicePing.payload["discord"]["id"].getStr() == ""
+
+    let bobPing = api.call(HttpGet, "/_matrix/provision/v1/ping", query = bobQuery)
+    check bobPing.code == Http200
+    check bobPing.payload["discord"]["logged_in"].getBool()
+    check bobPing.payload["discord"]["id"].getStr() == "123"
 
   test "websocket subprotocol auth accepted for qr login":
     let api = newTestApi()

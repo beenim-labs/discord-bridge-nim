@@ -6,6 +6,7 @@ import bridge/runtime
 import database/[entities, store]
 import provisioning/[contracts, ws_qr]
 import remoteauth/live_client
+import discord/rest_client
 
 type
   UserSessionState = object
@@ -16,6 +17,13 @@ type
     discriminator: string
 
   RunQrLoginFn* = proc(timeoutMs: int, onQrCode: proc(url: string) {.closure, gcsafe.}): Future[RemoteAuthLoginResult] {.closure, gcsafe.}
+  VerifyDiscordTokenFn* = proc(token: string): tuple[
+    ok: bool,
+    discordId: string,
+    username: string,
+    discriminator: string,
+    err: string
+  ] {.closure, gcsafe.}
 
   ProvisioningResult* = object
     handled*: bool
@@ -26,6 +34,7 @@ type
     cfg*: Config
     runtime*: DiscordBridgeRuntime
     runQrLogin*: RunQrLoginFn
+    verifyDiscordToken*: VerifyDiscordTokenFn
     lock: Lock
     sessions: Table[string, UserSessionState]
     localUsers: Table[string, UserRecord]
@@ -101,6 +110,28 @@ proc discordIdFromToken(token: string): string =
       return ""
   decoded
 
+proc verifyDiscordTokenWithRest(token: string): tuple[
+  ok: bool,
+  discordId: string,
+  username: string,
+  discriminator: string,
+  err: string
+] =
+  if token.len == 0:
+    return (false, "", "", "", "empty token")
+  let me = newDiscordRestClient(token).getCurrentUser()
+  if not me.ok:
+    return (false, "", "", "", if me.err.len > 0: me.err else: "discord auth failed")
+  if me.body.kind != JObject:
+    return (false, "", "", "", "discord auth response missing user object")
+  (
+    true,
+    me.body{"id"}.getStr(""),
+    me.body{"username"}.getStr(""),
+    me.body{"discriminator"}.getStr(""),
+    ""
+  )
+
 proc provisioningResult(code: HttpCode, payload: JsonNode): ProvisioningResult =
   ProvisioningResult(handled: true, code: code, payload: payload)
 
@@ -155,6 +186,46 @@ proc getSessionState(api: ProvisioningApi, mxid: string): UserSessionState =
 proc storeSessionState(api: ProvisioningApi, mxid: string, state: UserSessionState) =
   withLock api.lock:
     api.sessions[mxid] = state
+
+proc detachDiscordIdentity(api: ProvisioningApi, owningMxid, discordId: string) =
+  if discordId.len == 0:
+    return
+
+  var reset = UserSessionState(
+    connected: false,
+    lastHeartbeatAck: 0,
+    lastHeartbeatSent: 0,
+    username: "",
+    discriminator: ""
+  )
+
+  if api.runtime != nil:
+    let linked = api.runtime.users.getByDiscordID(discordId)
+    if linked.found and linked.rec.mxid != owningMxid:
+      var detached = linked.rec
+      detached.discordId = ""
+      detached.discordToken = ""
+      detached.heartbeatSessionJson = sessionStateJson(reset)
+      api.storeSessionState(detached.mxid, reset)
+      api.storeUser(detached)
+    return
+
+  var detachMxid = ""
+  var detached = UserRecord()
+  withLock api.lock:
+    for mxid, rec in api.localUsers:
+      if rec.discordId == discordId and mxid != owningMxid:
+        detachMxid = mxid
+        detached = rec
+        break
+
+  if detachMxid.len == 0:
+    return
+  detached.discordId = ""
+  detached.discordToken = ""
+  detached.heartbeatSessionJson = sessionStateJson(reset)
+  api.storeSessionState(detachMxid, reset)
+  api.storeUser(detached)
 
 proc subPath(api: ProvisioningApi, fullPath: string): tuple[handled: bool, sub: string] =
   let prefix = api.cfg.bridge.provisioning.prefix.strip()
@@ -226,13 +297,25 @@ proc handleRequest*(
       return provisioningResult(Http409, errorResponse("You're already connected to discord", ErrCodeAlreadyConnected))
     if user.discordToken.len == 0:
       return provisioningResult(Http500, errorResponse("Failed to connect to discord", ErrCodeConnectFailed))
+    let verified = api.verifyDiscordToken(user.discordToken)
+    if not verified.ok:
+      return provisioningResult(Http500, errorResponse("Failed to connect to discord", ErrCodeConnectFailed))
     let ts = nowMs()
     session.connected = true
     session.lastHeartbeatSent = ts
     session.lastHeartbeatAck = ts
+    if verified.username.len > 0:
+      session.username = verified.username
+    if verified.discriminator.len > 0:
+      session.discriminator = verified.discriminator
+    if verified.discordId.len > 0:
+      api.detachDiscordIdentity(user.mxid, verified.discordId)
+      user.discordId = verified.discordId
     user.heartbeatSessionJson = sessionStateJson(session)
     api.storeSessionState(user.mxid, session)
     api.storeUser(user)
+    if api.runtime != nil and api.runtime.userStartup != nil:
+      api.runtime.userStartup.startUsers()
     return provisioningResult(Http200, successResponse("Connected to Discord"))
 
   if reqMethod == HttpGet and sub == "/v1/login/qr":
@@ -257,9 +340,21 @@ proc handleRequest*(
     if token.len == 0:
       return provisioningResult(Http401, errorResponse("Failed to connect to Discord", ErrCodePostLoginConnFailed))
 
+    let verified = api.verifyDiscordToken(token)
+    if not verified.ok:
+      return provisioningResult(Http401, errorResponse("Failed to connect to Discord", ErrCodePostLoginConnFailed))
+
     user.discordToken = token
+    if verified.discordId.len > 0:
+      api.detachDiscordIdentity(user.mxid, verified.discordId)
+      user.discordId = verified.discordId
+    session.username = verified.username
+    session.discriminator = verified.discriminator
     if user.discordId.len == 0:
-      user.discordId = discordIdFromToken(token)
+      let guessedDiscordId = discordIdFromToken(token)
+      if guessedDiscordId.len > 0:
+        api.detachDiscordIdentity(user.mxid, guessedDiscordId)
+        user.discordId = guessedDiscordId
 
     let ts = nowMs()
     session.connected = true
@@ -268,6 +363,8 @@ proc handleRequest*(
     user.heartbeatSessionJson = sessionStateJson(session)
     api.storeSessionState(user.mxid, session)
     api.storeUser(user)
+    if api.runtime != nil and api.runtime.userStartup != nil:
+      api.runtime.userStartup.startUsers()
     return provisioningResult(Http200, loginResponse(user.discordId, session.username, session.discriminator))
 
   if reqMethod == HttpGet and sub == "/v1/guilds":
@@ -318,12 +415,14 @@ proc handleQrLoginWs(api: ProvisioningApi, req: Request, uid: string): Future[vo
     session.discriminator = login.user.discriminator
 
     user.discordToken = login.user.token
-    if user.discordId.len == 0:
-      user.discordId =
-        if login.user.userId.len > 0:
-          login.user.userId
-        else:
-          discordIdFromToken(login.user.token)
+    let loginDiscordId =
+      if login.user.userId.len > 0:
+        login.user.userId
+      else:
+        discordIdFromToken(login.user.token)
+    if loginDiscordId.len > 0:
+      api.detachDiscordIdentity(user.mxid, loginDiscordId)
+      user.discordId = loginDiscordId
 
     user.heartbeatSessionJson = sessionStateJson(session)
     api.storeSessionState(user.mxid, session)
@@ -350,6 +449,7 @@ proc newProvisioningApi*(cfg: Config, runtime: DiscordBridgeRuntime = nil): Prov
   result.localUsers = initTable[string, UserRecord]()
   result.runQrLogin = proc(timeoutMs: int, onQrCode: proc(url: string) {.closure, gcsafe.}): Future[RemoteAuthLoginResult] {.async, gcsafe.} =
     await runRemoteAuthLogin(timeoutMs, onQrCode)
+  result.verifyDiscordToken = verifyDiscordTokenWithRest
   initLock(result.lock)
 
 proc handle*(api: ProvisioningApi, req: Request): Future[bool] {.async.} =

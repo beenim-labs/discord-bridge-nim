@@ -23,9 +23,9 @@ type
     ephemeral*: seq[MatrixEvent]
     raw*: JsonNode
 
-  TransactionHandler* = proc(tx: AppserviceTransaction): Future[void] {.gcsafe, closure.}
-  HealthProvider* = proc(): JsonNode {.gcsafe, closure.}
-  CustomRequestHandler* = proc(req: Request): Future[bool] {.gcsafe, closure.}
+  TransactionHandler* = proc(tx: AppserviceTransaction): Future[void] {.closure.}
+  HealthProvider* = proc(): JsonNode {.closure.}
+  CustomRequestHandler* = proc(req: Request): Future[bool] {.closure.}
 
   AppserviceServer* = ref object
     cfg*: Config
@@ -220,8 +220,9 @@ proc handleRequest(server: AppserviceServer, req: Request) {.async.} =
 proc runForever*(server: AppserviceServer) {.async.} =
   let httpServer = newAsyncHttpServer()
   info(fmt"Appservice listening on {server.cfg.appservice.hostname}:{server.cfg.appservice.port}")
-  let cb = proc(req: Request) {.async.} =
+  let cbRaw = proc(req: Request): Future[void] {.async.} =
     await server.handleRequest(req)
+  let cb = cast[proc(request: Request): Future[void] {.closure, gcsafe.}](cbRaw)
   await httpServer.serve(
     Port(server.cfg.appservice.port),
     cb,

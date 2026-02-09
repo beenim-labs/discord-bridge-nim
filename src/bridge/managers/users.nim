@@ -18,6 +18,11 @@ proc newUserManager*(db: BridgeDb): UserManager =
   result.byDiscord = initTable[string, string]()
 
 proc remember(mgr: UserManager, rec: UserRecord) =
+  if mgr.byMxid.hasKey(rec.mxid):
+    let prev = mgr.byMxid[rec.mxid]
+    if prev.discordId.len > 0 and
+       mgr.byDiscord.getOrDefault(prev.discordId, "") == rec.mxid:
+      mgr.byDiscord.del(prev.discordId)
   mgr.byMxid[rec.mxid] = rec
   if rec.discordId.len > 0:
     mgr.byDiscord[rec.discordId] = rec.mxid

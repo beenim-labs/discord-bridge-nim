@@ -3,8 +3,11 @@
 import std/[asyncdispatch, json, locks, strutils, tables, times]
 import database/[database, entities, store]
 import bridge/managers/users
+import discord/rest_client
 
 type
+  VerifyTokenProc* = proc(token: string): tuple[ok: bool, err: string] {.closure, gcsafe.}
+
   UserStartupState* = object
     mxid*: string
     attemptCount*: int
@@ -23,6 +26,7 @@ type
     maxRetries*: int
     states: Table[string, UserStartupState]
     activeWorkers: int
+    verifyToken*: VerifyTokenProc
 
 proc nowMs(): int64 =
   getTime().toUnix().int64 * 1000
@@ -39,35 +43,16 @@ proc newUserStartupCoordinator*(db: BridgeDb, users: UserManager): UserStartupCo
   result.maxRetries = 6
   result.states = initTable[string, UserStartupState]()
   result.activeWorkers = 0
+  result.verifyToken = proc(token: string): tuple[ok: bool, err: string] {.closure, gcsafe.} =
+    if token.len == 0:
+      return (false, "not logged in")
+    let me = newDiscordRestClient(token).getCurrentUser()
+    if me.ok:
+      return (true, "")
+    let status = if me.status > 0: "status " & $me.status else: "network error"
+    let detail = if me.err.len > 0: me.err else: status
+    (false, "discord auth failed: " & detail)
   initLock(result.lock)
-
-proc parseRetryPrefix(token: string): tuple[hasRetry: bool, retriesBeforeSuccess: int] =
-  if not token.startsWith("retry:"):
-    return (false, 0)
-
-  let first = token.find(':')
-  let second = token.find(':', first + 1)
-  if first < 0 or second < 0:
-    return (false, 0)
-  let retryPart = token[first + 1 ..< second]
-  try:
-    let n = parseInt(retryPart)
-    if n >= 0:
-      return (true, n)
-  except CatchableError:
-    discard
-  (false, 0)
-
-proc shouldConnect(token: string, retryCount: int): tuple[ok: bool, err: string] =
-  if token.len == 0:
-    return (false, "not logged in")
-  if token.startsWith("fail:"):
-    return (false, token[5 .. ^1])
-
-  let retry = parseRetryPrefix(token)
-  if retry.hasRetry and retryCount < retry.retriesBeforeSuccess:
-    return (false, "transient startup failure")
-  (true, "")
 
 proc markWorkerDone(coord: UserStartupCoordinator) =
   withLock coord.lock:
@@ -126,7 +111,7 @@ proc startupTryConnect(coord: UserStartupCoordinator, mxid: string, retryCount: 
   )
   coord.setState(state)
 
-  let attempt = shouldConnect(user.discordToken, retryCount)
+  let attempt = coord.verifyToken(user.discordToken)
   if attempt.ok:
     state.connected = true
     state.status = "connected"
@@ -159,23 +144,38 @@ proc startUsers*(coord: UserStartupCoordinator) =
   if coord == nil:
     return
 
+  var alreadyRunning = false
   withLock coord.lock:
-    if coord.running:
-      return
+    alreadyRunning = coord.running
     coord.running = true
     coord.canceled = false
-    coord.states.clear()
-    coord.activeWorkers = 0
+    if not alreadyRunning:
+      coord.states.clear()
+      coord.activeWorkers = 0
 
   let usersWithToken = coord.db.getAllUsersWithToken()
   if usersWithToken.len == 0:
-    withLock coord.lock:
-      coord.running = false
+    if not alreadyRunning:
+      withLock coord.lock:
+        coord.running = false
     return
 
   for rec in usersWithToken:
+    if rec.discordToken.len == 0:
+      continue
     discard coord.users.getByMXID(rec.mxid, createIfMissing = true)
     coord.users.upsert(rec)
+
+    var shouldStart = true
+    withLock coord.lock:
+      if coord.states.hasKey(rec.mxid):
+        let existing = coord.states[rec.mxid]
+        if existing.status in ["pending", "connecting", "retrying"]:
+          shouldStart = false
+        elif existing.status == "connected":
+          shouldStart = false
+    if not shouldStart:
+      continue
 
     let initial = UserStartupState(
       mxid: rec.mxid,

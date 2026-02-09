@@ -955,10 +955,154 @@ proc resumeHandler*(ctx: UserContext) =
 # Event dispatcher (mirrors user.eventHandler)
 # ===========================================================================
 
+proc asString(node: JsonNode, key: string): string =
+  if node.kind == JObject and node.hasKey(key):
+    return node[key].getStr("")
+  ""
+
+proc asInt(node: JsonNode, key: string): int =
+  if node.kind == JObject and node.hasKey(key):
+    return node[key].getInt(0)
+  0
+
+proc asBool(node: JsonNode, key: string): bool =
+  if node.kind == JObject and node.hasKey(key):
+    return node[key].getBool(false)
+  false
+
+proc parseInt64(raw: string): int64 =
+  try:
+    parseBiggestInt(raw).int64
+  except CatchableError:
+    0
+
+proc parseDiscordRole(node: JsonNode): DiscordRole =
+  DiscordRole(
+    id: node.asString("id"),
+    name: node.asString("name"),
+    icon: node.asString("icon"),
+    mentionable: node.asBool("mentionable"),
+    managed: node.asBool("managed"),
+    hoist: node.asBool("hoist"),
+    color: node.asInt("color"),
+    position: node.asInt("position"),
+    permissions: parseInt64(node.asString("permissions"))
+  )
+
+proc parseDiscordChannel(node: JsonNode): DiscordChannel =
+  var recipients: seq[DiscordChannelRecipient] = @[]
+  if node.hasKey("recipients") and node["recipients"].kind == JArray:
+    for recipient in node["recipients"]:
+      if recipient.kind == JObject:
+        recipients.add(DiscordChannelRecipient(id: recipient.asString("id")))
+  DiscordChannel(
+    id: node.asString("id"),
+    name: node.asString("name"),
+    topic: node.asString("topic"),
+    icon: node.asString("icon"),
+    parentId: node.asString("parent_id"),
+    guildId: node.asString("guild_id"),
+    chanType: node.asInt("type"),
+    nsfw: node.asBool("nsfw"),
+    unavailable: node.asBool("unavailable"),
+    recipients: recipients
+  )
+
+proc parseGuildMeta(node: JsonNode): DiscordGuildMeta =
+  var channels: seq[DiscordChannel] = @[]
+  var roles: seq[DiscordRole] = @[]
+  if node.hasKey("channels") and node["channels"].kind == JArray:
+    for ch in node["channels"]:
+      if ch.kind == JObject:
+        channels.add(parseDiscordChannel(ch))
+  if node.hasKey("roles") and node["roles"].kind == JArray:
+    for role in node["roles"]:
+      if role.kind == JObject:
+        roles.add(parseDiscordRole(role))
+  DiscordGuildMeta(
+    id: node.asString("id"),
+    name: node.asString("name"),
+    unavailable: node.asBool("unavailable"),
+    memberCount: node.asInt("member_count"),
+    channels: channels,
+    roles: roles
+  )
+
+proc parseReadyEvent(node: JsonNode): DiscordReadyEvent =
+  var guilds: seq[DiscordGuildMeta] = @[]
+  var privateChannels: seq[DiscordChannel] = @[]
+  var rels: seq[DiscordRelationship] = @[]
+  var readStateEntries: seq[DiscordReadStateEntry] = @[]
+
+  if node.hasKey("guilds") and node["guilds"].kind == JArray:
+    for guildNode in node["guilds"]:
+      if guildNode.kind == JObject:
+        guilds.add(parseGuildMeta(guildNode))
+  if node.hasKey("private_channels") and node["private_channels"].kind == JArray:
+    for chNode in node["private_channels"]:
+      if chNode.kind == JObject:
+        privateChannels.add(parseDiscordChannel(chNode))
+  if node.hasKey("relationships") and node["relationships"].kind == JArray:
+    for relNode in node["relationships"]:
+      if relNode.kind == JObject:
+        rels.add(DiscordRelationship(
+          id: relNode.asString("id"),
+          nickname: relNode.asString("nickname")
+        ))
+  if node.hasKey("read_state") and node["read_state"].kind == JObject:
+    let readState = node["read_state"]
+    if readState.hasKey("version"):
+      discard
+    if readState.hasKey("entries") and readState["entries"].kind == JArray:
+      for entryNode in readState["entries"]:
+        if entryNode.kind != JObject:
+          continue
+        readStateEntries.add(DiscordReadStateEntry(
+          channelId: entryNode.asString("id"),
+          lastMessageId: entryNode.asString("last_message_id")
+        ))
+
+  let userNode = if node.hasKey("user") and node["user"].kind == JObject: node["user"] else: newJObject()
+  let readVersion =
+    if node.hasKey("read_state") and node["read_state"].kind == JObject:
+      asInt(node["read_state"], "version")
+    else:
+      0
+
+  DiscordReadyEvent(
+    userId: userNode.asString("id"),
+    guilds: guilds,
+    privateChannels: privateChannels,
+    relationships: rels,
+    readStateVersion: readVersion,
+    readStateEntries: readStateEntries
+  )
+
+proc parseRelationship(node: JsonNode): DiscordRelationship =
+  DiscordRelationship(
+    id: node.asString("id"),
+    nickname: node.asString("nickname")
+  )
+
+proc parseThreadSync(node: JsonNode): DiscordThreadListSync =
+  var threads: seq[DiscordChannel] = @[]
+  if node.hasKey("threads") and node["threads"].kind == JArray:
+    for th in node["threads"]:
+      if th.kind == JObject:
+        threads.add(parseDiscordChannel(th))
+  DiscordThreadListSync(
+    guildId: node.asString("guild_id"),
+    threads: threads
+  )
+
+proc parseMessageContext(node: JsonNode): tuple[channelId: string, guildId: string] =
+  (node.asString("channel_id"), node.asString("guild_id"))
+
 proc eventHandler*(ctx: UserContext, event: DiscordEvent) =
   case event.kind
   of dekReady:
-    discard  # Full implementation parses event.data → DiscordReadyEvent
+    if event.data.kind == JObject:
+      ctx.readyHandler(parseReadyEvent(event.data))
   of dekResumed:
     ctx.resumeHandler()
   of dekConnect:
@@ -967,29 +1111,85 @@ proc eventHandler*(ctx: UserContext, event: DiscordEvent) =
     ctx.disconnectedHandler()
   of dekInvalidAuth:
     ctx.invalidAuthHandler()
-  of dekGuildCreate, dekGuildUpdate:
-    discard  # Full implementation parses event.data
+  of dekGuildCreate:
+    if event.data.kind == JObject:
+      ctx.guildCreateHandler(parseGuildMeta(event.data))
+  of dekGuildUpdate:
+    if event.data.kind == JObject:
+      ctx.guildUpdateHandler(parseGuildMeta(event.data))
   of dekGuildDelete:
-    discard
+    if event.data.kind == JObject:
+      ctx.guildDeleteHandler(event.data.asString("id"), event.data.asBool("unavailable"))
   of dekGuildRoleCreate, dekGuildRoleUpdate, dekGuildRoleDelete:
     discard
-  of dekChannelCreate, dekChannelDelete, dekChannelUpdate:
-    discard
-  of dekChannelRecipientAdd, dekChannelRecipientRemove:
-    discard
-  of dekRelationshipAdd, dekRelationshipUpdate, dekRelationshipRemove:
-    discard
-  of dekMessageCreate, dekMessageDelete, dekMessageDeleteBulk,
-     dekMessageUpdate, dekMessageReactionAdd, dekMessageReactionRemove:
-    discard
+  of dekChannelCreate:
+    if event.data.kind == JObject:
+      ctx.channelCreateHandler(parseDiscordChannel(event.data))
+  of dekChannelDelete:
+    if event.data.kind == JObject:
+      ctx.channelDeleteHandler(event.data.asString("id"), event.data.asString("guild_id"))
+  of dekChannelUpdate:
+    if event.data.kind == JObject:
+      ctx.channelUpdateHandler(parseDiscordChannel(event.data))
+  of dekChannelRecipientAdd:
+    if event.data.kind == JObject:
+      let userNode =
+        if event.data.hasKey("user") and event.data["user"].kind == JObject:
+          event.data["user"]
+        else:
+          newJObject()
+      ctx.channelRecipientAdd(event.data.asString("channel_id"), userNode.asString("id"))
+  of dekChannelRecipientRemove:
+    if event.data.kind == JObject:
+      let userNode =
+        if event.data.hasKey("user") and event.data["user"].kind == JObject:
+          event.data["user"]
+        else:
+          newJObject()
+      ctx.channelRecipientRemove(event.data.asString("channel_id"), userNode.asString("id"))
+  of dekRelationshipAdd:
+    if event.data.kind == JObject:
+      ctx.relationshipAddHandler(parseRelationship(event.data))
+  of dekRelationshipUpdate:
+    if event.data.kind == JObject:
+      ctx.relationshipUpdateHandler(parseRelationship(event.data))
+  of dekRelationshipRemove:
+    if event.data.kind == JObject:
+      ctx.relationshipRemoveHandler(event.data.asString("id"))
+  of dekMessageCreate, dekMessageUpdate, dekMessageReactionAdd, dekMessageReactionRemove:
+    if event.data.kind == JObject:
+      let (channelId, guildId) = parseMessageContext(event.data)
+      ctx.pushPortalMessage(event, channelId, guildId)
+  of dekMessageDelete:
+    if event.data.kind == JObject:
+      let (channelId, guildId) = parseMessageContext(event.data)
+      ctx.pushPortalMessage(event, channelId, guildId)
+  of dekMessageDeleteBulk:
+    if event.data.kind == JObject:
+      let (channelId, guildId) = parseMessageContext(event.data)
+      ctx.pushPortalMessage(event, channelId, guildId)
   of dekMessageAck:
-    discard
+    if event.data.kind == JObject:
+      ctx.messageAckHandler(
+        event.data.asString("channel_id"),
+        event.data.asString("message_id"),
+        event.data.asInt("version")
+      )
   of dekTypingStart:
-    discard
+    if event.data.kind == JObject:
+      let userNode =
+        if event.data.hasKey("user") and event.data["user"].kind == JObject:
+          event.data["user"]
+        else:
+          newJObject()
+      ctx.typingStartHandler(event.data.asString("channel_id"), userNode.asString("id"))
   of dekInteractionSuccess:
-    discard
+    if event.data.kind == JObject:
+      ctx.interactionSuccessHandler(event.data.asString("nonce"), event.data.asString("id"))
   of dekThreadListSync:
-    discard
+    if event.data.kind == JObject:
+      let parsed = parseThreadSync(event.data)
+      ctx.threadListSyncHandler(parsed.guildId, parsed.threads)
   of dekUnknown:
     discard
 
