@@ -1,6 +1,6 @@
 ## Bridge lifecycle and wiring for appservice and provisioning shell.
 
-import std/[os, asyncdispatch, asynchttpserver, json, sets, strformat, strutils]
+import std/[os, asyncdispatch, asynchttpserver, json, sets, strformat, strutils, uri]
 import config/config
 import appservice/[registration, server]
 import provisioning/server as provisioning_server
@@ -80,9 +80,10 @@ proc relayRoomMessageToDiscord(svc: DiscordBridgeService, event: MatrixEvent) =
     return
   if event.roomId.len == 0:
     return
-  let message = event.parseCommandBody()
-  if message.len == 0:
-    return
+  var message = event.parseCommandBody()
+  var mediaUrl = ""
+  if event.content.kind == JObject:
+    mediaUrl = event.content{"url"}.getStr("").strip()
 
   let portal = svc.db.getPortalByMXID(event.roomId)
   if not portal.found or portal.rec.key.channelId.len == 0:
@@ -93,6 +94,24 @@ proc relayRoomMessageToDiscord(svc: DiscordBridgeService, event: MatrixEvent) =
     return
 
   let rest = newDiscordRestClient(sender.rec.discordToken)
+  if mediaUrl.startsWith("file://"):
+    let encodedPath = mediaUrl["file://".len .. ^1]
+    let localPath = decodeUrl(encodedPath).strip()
+    let sent = rest.createMessageWithFile(portal.rec.key.channelId, message, localPath)
+    if not sent.ok:
+      inc svc.failedEvents
+      warn(fmt"Failed to relay Matrix file to Discord channel {portal.rec.key.channelId}: status={sent.status} err={sent.err}")
+    return
+
+  if mediaUrl.len > 0:
+    if message.len == 0:
+      message = mediaUrl
+    elif mediaUrl notin message:
+      message = message & "\n" & mediaUrl
+
+  if message.len == 0:
+    return
+
   let sent = rest.createMessage(portal.rec.key.channelId, %*{"content": message})
   if not sent.ok:
     inc svc.failedEvents

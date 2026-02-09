@@ -1,12 +1,13 @@
 ## Provisioning API shell compatible with Go route surface.
 
-import std/[asyncdispatch, asynchttpserver, base64, json, locks, strutils, tables, times, uri]
+import std/[algorithm, asyncdispatch, asynchttpserver, base64, httpclient, json, locks, sets, strutils, tables, times, uri]
 import config/config
 import bridge/runtime
 import database/[entities, store]
 import provisioning/[contracts, ws_qr]
 import remoteauth/live_client
 import discord/rest_client
+import common/logging
 
 type
   UserSessionState = object
@@ -38,6 +39,12 @@ type
     lock: Lock
     sessions: Table[string, UserSessionState]
     localUsers: Table[string, UserRecord]
+    pollingUsers: HashSet[string]
+
+  DiscordRecipientInfo = object
+    id: string
+    displayName: string
+    avatarUrl: string
 
 proc nowMs(): int64 =
   getTime().toUnix().int64 * 1000
@@ -156,11 +163,13 @@ proc mapFailureToErrcode(kind: RemoteAuthFailureKind): string =
     ErrCodeLoginFailed
 
 proc getOrCreateUser(api: ProvisioningApi, mxid: string): UserRecord =
-  if api.runtime != nil:
-    let fromMgr = api.runtime.users.getByMXID(mxid, createIfMissing = true)
-    if fromMgr.found:
-      return fromMgr.rec
-    return newUserRecord(mxid)
+  if api.runtime != nil and api.runtime.db != nil:
+    let fromDb = api.runtime.db.getUserByMXID(mxid)
+    if fromDb.found:
+      return fromDb.rec
+    let created = newUserRecord(mxid)
+    api.runtime.db.insertUser(created)
+    return created
 
   withLock api.lock:
     if api.localUsers.hasKey(mxid):
@@ -171,8 +180,12 @@ proc getOrCreateUser(api: ProvisioningApi, mxid: string): UserRecord =
       result = created
 
 proc storeUser(api: ProvisioningApi, rec: UserRecord) =
-  if api.runtime != nil:
-    api.runtime.users.upsert(rec)
+  if api.runtime != nil and api.runtime.db != nil:
+    let existing = api.runtime.db.getUserByMXID(rec.mxid)
+    if existing.found:
+      api.runtime.db.updateUser(rec)
+    else:
+      api.runtime.db.insertUser(rec)
     return
   withLock api.lock:
     api.localUsers[rec.mxid] = rec
@@ -187,6 +200,803 @@ proc storeSessionState(api: ProvisioningApi, mxid: string, state: UserSessionSta
   withLock api.lock:
     api.sessions[mxid] = state
 
+proc runtimeManagersReady(api: ProvisioningApi): bool =
+  api.runtime != nil and api.runtime.db != nil
+
+proc appserviceBotUserId(api: ProvisioningApi): string =
+  let localpart =
+    if api.cfg.appservice.bot.username.len > 0:
+      api.cfg.appservice.bot.username
+    else:
+      "discordbot"
+  "@" & localpart & ":" & api.cfg.homeserver.domain
+
+proc appservicePuppetUserId(api: ProvisioningApi, discordId: string): string =
+  if discordId.len == 0:
+    return ""
+  "@" & api.cfg.bridge.formatUsername(discordId) & ":" & api.cfg.homeserver.domain
+
+proc matrixClientRequestAsUser(
+    api: ProvisioningApi,
+    actingUser: string,
+    httpMethod: HttpMethod,
+    path: string,
+    payload: JsonNode = newJNull()
+): tuple[ok: bool, status: int, body: JsonNode, raw: string, err: string] =
+  let asToken = api.cfg.appservice.asToken.strip()
+  if asToken.len == 0:
+    return (false, 0, newJNull(), "", "appservice.as_token is empty")
+  let hs = api.cfg.homeserver.address.strip()
+  if hs.len == 0:
+    return (false, 0, newJNull(), "", "homeserver.address is empty")
+  if actingUser.len == 0:
+    return (false, 0, newJNull(), "", "acting user is empty")
+
+  let sep = if '?' in path: "&" else: "?"
+  let endpoint = hs & path & sep &
+    "access_token=" & encodeUrl(asToken) &
+    "&user_id=" & encodeUrl(actingUser)
+
+  var http = newHttpClient()
+  http.headers = newHttpHeaders({"Content-Type": "application/json"})
+  try:
+    let resp =
+      if payload.kind != JNull:
+        http.request(endpoint, httpMethod, body = $payload)
+      else:
+        http.request(endpoint, httpMethod)
+    let raw = resp.body
+    var parsed = newJNull()
+    if raw.len > 0:
+      try:
+        parsed = parseJson(raw)
+      except CatchableError:
+        discard
+    if resp.code.is2xx:
+      return (true, int(resp.code), parsed, raw, "")
+    let err =
+      if parsed.kind == JObject:
+        let msg = parsed{"error"}.getStr("")
+        if msg.len > 0: msg else: raw
+      else:
+        raw
+    (false, int(resp.code), parsed, raw, err)
+  except CatchableError as e:
+    (false, 0, newJNull(), "", e.msg)
+
+proc matrixErrCode(resp: tuple[ok: bool, status: int, body: JsonNode, raw: string, err: string]): string =
+  if resp.body.kind != JObject:
+    return ""
+  resp.body{"errcode"}.getStr("").toUpperAscii()
+
+proc matrixEnsureRegistered(api: ProvisioningApi, userMxid: string): bool =
+  if userMxid.len < 4 or userMxid[0] != '@':
+    return false
+  let sep = userMxid.rfind(':')
+  if sep <= 1:
+    return false
+  let localpart = userMxid[1 ..< sep]
+  let req = %*{
+    "type": "m.login.application_service",
+    "username": localpart
+  }
+  let resp = api.matrixClientRequestAsUser(
+    actingUser = userMxid,
+    httpMethod = HttpPost,
+    path = "/_matrix/client/v3/register",
+    payload = req
+  )
+  if resp.ok:
+    return true
+  if resp.matrixErrCode() == "M_USER_IN_USE":
+    return true
+  if resp.raw.toLowerAscii().contains("already") and resp.raw.toLowerAscii().contains("in use"):
+    return true
+  warn("Failed to register appservice user " & userMxid & ": " & resp.err)
+  false
+
+proc matrixSetDisplayName(api: ProvisioningApi, userMxid, displayName: string): bool =
+  if userMxid.len == 0 or displayName.len == 0:
+    return false
+  let resp = api.matrixClientRequestAsUser(
+    actingUser = userMxid,
+    httpMethod = HttpPut,
+    path = "/_matrix/client/v3/profile/" & encodeUrl(userMxid) & "/displayname",
+    payload = %*{"displayname": displayName}
+  )
+  if not resp.ok:
+    warn("Failed to set display name for " & userMxid & ": " & resp.err)
+  resp.ok
+
+proc matrixSetAvatar(api: ProvisioningApi, userMxid, avatarUrl: string): bool =
+  if userMxid.len == 0 or avatarUrl.len == 0:
+    return false
+  let resp = api.matrixClientRequestAsUser(
+    actingUser = userMxid,
+    httpMethod = HttpPut,
+    path = "/_matrix/client/v3/profile/" & encodeUrl(userMxid) & "/avatar_url",
+    payload = %*{"avatar_url": avatarUrl}
+  )
+  if not resp.ok:
+    warn("Failed to set avatar for " & userMxid & ": " & resp.err)
+  resp.ok
+
+proc matrixInviteUser(api: ProvisioningApi, roomId, targetUserMxid: string): bool =
+  if roomId.len == 0 or targetUserMxid.len == 0:
+    return false
+  let botUser = api.appserviceBotUserId()
+  let resp = api.matrixClientRequestAsUser(
+    actingUser = botUser,
+    httpMethod = HttpPost,
+    path = "/_matrix/client/v3/rooms/" & encodeUrl(roomId) & "/invite",
+    payload = %*{"user_id": targetUserMxid}
+  )
+  if resp.ok:
+    return true
+  let rawLower = resp.raw.toLowerAscii()
+  if "already" in rawLower and ("join" in rawLower or "invite" in rawLower):
+    return true
+  warn("Failed to invite " & targetUserMxid & " to " & roomId & ": " & resp.err)
+  false
+
+proc matrixJoinRoom(api: ProvisioningApi, roomId, userMxid: string): bool =
+  if roomId.len == 0 or userMxid.len == 0:
+    return false
+  let resp = api.matrixClientRequestAsUser(
+    actingUser = userMxid,
+    httpMethod = HttpPost,
+    path = "/_matrix/client/v3/join/" & encodeUrl(roomId),
+    payload = %*{}
+  )
+  if resp.ok:
+    return true
+  let rawLower = resp.raw.toLowerAscii()
+  if "already" in rawLower and "join" in rawLower:
+    return true
+  warn("Failed to join room " & roomId & " as " & userMxid & ": " & resp.err)
+  false
+
+proc matrixSetRoomNameAsBot(api: ProvisioningApi, roomId, roomName: string): bool =
+  if roomId.len == 0 or roomName.len == 0:
+    return false
+  let botUser = api.appserviceBotUserId()
+  let resp = api.matrixClientRequestAsUser(
+    actingUser = botUser,
+    httpMethod = HttpPut,
+    path = "/_matrix/client/v3/rooms/" & encodeUrl(roomId) & "/state/m.room.name",
+    payload = %*{"name": roomName}
+  )
+  if not resp.ok:
+    warn("Failed to set room name for " & roomId & ": " & resp.err)
+  resp.ok
+
+proc matrixSetRoomAvatarAsBot(api: ProvisioningApi, roomId, avatarUrl: string): bool =
+  if roomId.len == 0 or avatarUrl.len == 0:
+    return false
+  let botUser = api.appserviceBotUserId()
+  let resp = api.matrixClientRequestAsUser(
+    actingUser = botUser,
+    httpMethod = HttpPut,
+    path = "/_matrix/client/v3/rooms/" & encodeUrl(roomId) & "/state/m.room.avatar",
+    payload = %*{"url": avatarUrl}
+  )
+  if not resp.ok:
+    warn("Failed to set room avatar for " & roomId & ": " & resp.err)
+  resp.ok
+
+proc matrixSendRoomEventAsUser(
+    api: ProvisioningApi,
+    roomId, senderMxid, eventType, txnId: string,
+    content: JsonNode
+): tuple[ok: bool, eventId: string, err: string]
+
+proc matrixSendRoomMessageAsUser(
+    api: ProvisioningApi,
+    roomId, senderMxid, txnId, body: string
+): tuple[ok: bool, eventId: string, err: string] =
+  if roomId.len == 0 or senderMxid.len == 0 or txnId.len == 0 or body.len == 0:
+    return (false, "", "invalid matrix message send args")
+  api.matrixSendRoomEventAsUser(
+    roomId = roomId,
+    senderMxid = senderMxid,
+    eventType = "m.room.message",
+    txnId = txnId,
+    content = %*{
+      "msgtype": "m.text",
+      "body": body
+    }
+  )
+
+proc matrixSendRoomEventAsUser(
+    api: ProvisioningApi,
+    roomId, senderMxid, eventType, txnId: string,
+    content: JsonNode
+): tuple[ok: bool, eventId: string, err: string] =
+  if roomId.len == 0 or senderMxid.len == 0 or eventType.len == 0 or txnId.len == 0 or content.kind != JObject:
+    return (false, "", "invalid matrix event send args")
+  let resp = api.matrixClientRequestAsUser(
+    actingUser = senderMxid,
+    httpMethod = HttpPut,
+    path = "/_matrix/client/v3/rooms/" & encodeUrl(roomId) &
+      "/send/" & encodeUrl(eventType) & "/" & encodeUrl(txnId),
+    payload = content
+  )
+  if not resp.ok:
+    return (false, "", resp.err)
+  let eventId = resp.body{"event_id"}.getStr("")
+  if eventId.len == 0:
+    return (false, "", "message send response missing event_id")
+  (true, eventId, "")
+
+proc attachmentMsgType(contentType, fileName: string): string =
+  let ct = contentType.toLowerAscii().strip()
+  if ct.startsWith("image/"):
+    return "m.image"
+  if ct.startsWith("video/"):
+    return "m.video"
+  if ct.startsWith("audio/"):
+    return "m.audio"
+  let lowerName = fileName.toLowerAscii()
+  if lowerName.endsWith(".png") or lowerName.endsWith(".jpg") or lowerName.endsWith(".jpeg") or
+      lowerName.endsWith(".gif") or lowerName.endsWith(".webp") or lowerName.endsWith(".bmp") or
+      lowerName.endsWith(".heic") or lowerName.endsWith(".heif"):
+    return "m.image"
+  if lowerName.endsWith(".mp4") or lowerName.endsWith(".mov") or lowerName.endsWith(".webm") or
+      lowerName.endsWith(".mkv"):
+    return "m.video"
+  if lowerName.endsWith(".mp3") or lowerName.endsWith(".m4a") or lowerName.endsWith(".aac") or
+      lowerName.endsWith(".wav") or lowerName.endsWith(".ogg"):
+    return "m.audio"
+  "m.file"
+
+proc discordMessageAttachments(msg: JsonNode): seq[JsonNode] =
+  result = @[]
+  if not msg.hasKey("attachments") or msg["attachments"].kind != JArray:
+    return
+  for att in msg["attachments"]:
+    if att.kind == JObject:
+      result.add(att)
+
+proc buildMatrixAttachmentContent(att: JsonNode): JsonNode =
+  let fileName = att{"filename"}.getStr("Attachment")
+  let url = att{"url"}.getStr("").strip()
+  let proxyUrl = att{"proxy_url"}.getStr("").strip()
+  let contentType = att{"content_type"}.getStr("")
+  let mediaUrl = if url.len > 0: url else: proxyUrl
+  if mediaUrl.len == 0:
+    return newJNull()
+  let msgType = attachmentMsgType(contentType, fileName)
+  var payload = %*{
+    "msgtype": msgType,
+    "body": fileName,
+    "url": mediaUrl
+  }
+  if att.hasKey("size"):
+    if not payload.hasKey("info") or payload["info"].kind != JObject:
+      payload["info"] = newJObject()
+    payload["info"]["size"] = %att{"size"}.getInt(0)
+  payload
+
+proc matrixCreateRoomAsBot(
+    api: ProvisioningApi,
+    roomReq: JsonNode
+): tuple[ok: bool, roomId: string, err: string] =
+  let asToken = api.cfg.appservice.asToken.strip()
+  if asToken.len == 0:
+    return (false, "", "appservice.as_token is empty")
+  let hs = api.cfg.homeserver.address.strip()
+  if hs.len == 0:
+    return (false, "", "homeserver.address is empty")
+
+  let botUser = api.appserviceBotUserId()
+  let endpoint = hs & "/_matrix/client/v3/createRoom?access_token=" & encodeUrl(asToken) &
+    "&user_id=" & encodeUrl(botUser)
+
+  var http = newHttpClient()
+  http.headers = newHttpHeaders({"Content-Type": "application/json"})
+  try:
+    let resp = http.request(endpoint, HttpPost, body = $roomReq)
+    if not resp.code.is2xx:
+      return (false, "", "createRoom failed: " & $resp.code & " " & resp.body)
+    let body = resp.body
+    if body.len == 0:
+      return (false, "", "createRoom returned empty body")
+    let parsed = parseJson(body)
+    let roomId = parsed{"room_id"}.getStr("")
+    if roomId.len == 0:
+      return (false, "", "createRoom response missing room_id")
+    (true, roomId, "")
+  except CatchableError as e:
+    (false, "", "createRoom request failed: " & e.msg)
+
+proc channelTypeName(channelType: int): string =
+  case channelType
+  of 1:
+    "dm"
+  of 3:
+    "group_dm"
+  else:
+    ""
+
+proc discordAvatarUrl(userId, avatarHash: string): string =
+  if userId.len == 0:
+    return ""
+  if avatarHash.len > 0:
+    let ext = if avatarHash.startsWith("a_"): "gif" else: "png"
+    return "https://cdn.discordapp.com/avatars/" & userId & "/" & avatarHash & "." & ext & "?size=128"
+  "https://cdn.discordapp.com/embed/avatars/0.png"
+
+proc resolvePrimaryRecipient(channel: JsonNode, selfDiscordId: string): DiscordRecipientInfo =
+  if not channel.hasKey("recipients") or channel["recipients"].kind != JArray:
+    return DiscordRecipientInfo()
+
+  var fallback = DiscordRecipientInfo()
+  for recipient in channel["recipients"]:
+    if recipient.kind != JObject:
+      continue
+    let id = recipient{"id"}.getStr("")
+    if id.len == 0:
+      continue
+    let displayName =
+      block:
+        let n = recipient{"global_name"}.getStr("").strip()
+        if n.len > 0:
+          n
+        else:
+          recipient{"username"}.getStr("").strip()
+    let info = DiscordRecipientInfo(
+      id: id,
+      displayName: if displayName.len > 0: displayName else: id,
+      avatarUrl: discordAvatarUrl(id, recipient{"avatar"}.getStr(""))
+    )
+    if fallback.id.len == 0:
+      fallback = info
+    if selfDiscordId.len > 0 and id == selfDiscordId:
+      continue
+    return info
+  fallback
+
+proc resolvePrivateChannelName(channel: JsonNode, selfDiscordId: string): string =
+  let channelType = channel{"type"}.getInt(0)
+  let explicitName = channel{"name"}.getStr("").strip()
+  if explicitName.len > 0:
+    return explicitName
+  let primaryRecipient = resolvePrimaryRecipient(channel, selfDiscordId)
+  if channelType == 1 and primaryRecipient.displayName.len > 0:
+    return primaryRecipient.displayName
+  if channel.hasKey("recipients") and channel["recipients"].kind == JArray:
+    var names: seq[string] = @[]
+    for recipient in channel["recipients"]:
+      if recipient.kind != JObject:
+        continue
+      let id = recipient{"id"}.getStr("")
+      if selfDiscordId.len > 0 and id == selfDiscordId:
+        continue
+      let n = recipient{"global_name"}.getStr("").strip()
+      if n.len > 0:
+        names.add(n)
+        continue
+      let u = recipient{"username"}.getStr("").strip()
+      if u.len > 0:
+        names.add(u)
+    if names.len > 0:
+      return names.join(", ")
+  if channelType == 3:
+    "Discord Group DM"
+  else:
+    "Discord DM"
+
+proc resolveOtherUserId(channel: JsonNode, selfDiscordId: string): string =
+  resolvePrimaryRecipient(channel, selfDiscordId).id
+
+proc compareDiscordSnowflakeIds(id1, id2: string): int =
+  if id1 == id2:
+    return 0
+  if id1.len < id2.len:
+    return -1
+  if id2.len < id1.len:
+    return 1
+  if id1 < id2:
+    return -1
+  1
+
+proc sortDiscordMessagesAscending(messages: var seq[JsonNode]) =
+  messages.sort(proc(a, b: JsonNode): int =
+    compareDiscordSnowflakeIds(a{"id"}.getStr(""), b{"id"}.getStr(""))
+  )
+
+proc messageBodyForMatrix(msg: JsonNode): string =
+  let content = msg{"content"}.getStr("").strip()
+  if content.len > 0:
+    return content
+  let attachmentCount =
+    if msg.hasKey("attachments") and msg["attachments"].kind == JArray:
+      msg["attachments"].len
+    else:
+      0
+  if attachmentCount > 0:
+    return if attachmentCount == 1: "[Attachment]" else: "[Attachments]"
+  let embedCount =
+    if msg.hasKey("embeds") and msg["embeds"].kind == JArray:
+      msg["embeds"].len
+    else:
+      0
+  if embedCount > 0:
+    return "[Embed]"
+  ""
+
+proc newestDiscordMessageId(messages: openArray[JsonNode]): string =
+  result = ""
+  for msg in messages:
+    let mid = msg{"id"}.getStr("")
+    if mid.len == 0:
+      continue
+    if result.len == 0 or compareDiscordSnowflakeIds(mid, result) > 0:
+      result = mid
+
+proc syncPrivateChannelMessages(
+    api: ProvisioningApi,
+    user: UserRecord,
+    rec: PortalRecord,
+    onlyNew = false
+): int =
+  if api.runtime == nil or api.runtime.db == nil:
+    return 0
+  if user.discordToken.len == 0 or rec.key.channelId.len == 0 or rec.mxid.len == 0:
+    return 0
+
+  let rest = newDiscordRestClient(user.discordToken)
+  var collected: seq[JsonNode] = @[]
+  const maxMessages = 300
+
+  let lastMapped = api.runtime.db.getLastMessage(rec.key)
+  if onlyNew and lastMapped.found and lastMapped.rec.discordId.len > 0:
+    var after = lastMapped.rec.discordId
+    while collected.len < maxMessages:
+      let remaining = maxMessages - collected.len
+      let limit = min(100, remaining)
+      let fetched = rest.getChannelMessages(rec.key.channelId, limit = limit, after = after)
+      if not fetched.ok:
+        warn("Failed to fetch Discord messages for channel " & rec.key.channelId & ": " & fetched.err)
+        break
+      if fetched.body.kind != JArray:
+        warn("Discord messages response is not an array for channel " & rec.key.channelId)
+        break
+      if fetched.body.len == 0:
+        break
+      for item in fetched.body:
+        if item.kind == JObject:
+          collected.add(item)
+      let newest = newestDiscordMessageId(fetched.body.elems)
+      if fetched.body.len < limit or newest.len == 0 or newest == after:
+        break
+      after = newest
+  else:
+    var before = ""
+    while collected.len < maxMessages:
+      let remaining = maxMessages - collected.len
+      let limit = min(100, remaining)
+      let fetched = rest.getChannelMessages(rec.key.channelId, limit = limit, before = before)
+      if not fetched.ok:
+        warn("Failed to fetch Discord messages for channel " & rec.key.channelId & ": " & fetched.err)
+        break
+      if fetched.body.kind != JArray:
+        warn("Discord messages response is not an array for channel " & rec.key.channelId)
+        break
+      if fetched.body.len == 0:
+        break
+
+      for item in fetched.body:
+        if item.kind == JObject:
+          collected.add(item)
+      let oldest = fetched.body[^1]{"id"}.getStr("")
+      if fetched.body.len < limit or oldest.len == 0:
+        break
+      before = oldest
+
+  if collected.len == 0:
+    return 0
+  sortDiscordMessagesAscending(collected)
+
+  var synced = 0
+  var preparedSenders = initHashSet[string]()
+  for msg in collected:
+    let discordMsgId = msg{"id"}.getStr("")
+    if discordMsgId.len == 0:
+      continue
+    if api.runtime.db.getMessagesByDiscordID(rec.key, discordMsgId).len > 0:
+      continue
+
+    let author = msg{"author"}
+    let senderDiscordId = author{"id"}.getStr("")
+    if senderDiscordId.len == 0:
+      continue
+    let senderMxid = api.appservicePuppetUserId(senderDiscordId)
+    if senderMxid.len == 0:
+      continue
+
+    if senderDiscordId notin preparedSenders:
+      if api.matrixEnsureRegistered(senderMxid):
+        let displayName =
+          block:
+            let n = author{"global_name"}.getStr("").strip()
+            if n.len > 0:
+              n
+            else:
+              author{"username"}.getStr("").strip()
+        if displayName.len > 0:
+          discard api.matrixSetDisplayName(senderMxid, displayName)
+        let avatar = discordAvatarUrl(senderDiscordId, author{"avatar"}.getStr(""))
+        if avatar.len > 0:
+          discard api.matrixSetAvatar(senderMxid, avatar)
+        discard api.matrixInviteUser(rec.mxid, senderMxid)
+        discard api.matrixJoinRoom(rec.mxid, senderMxid)
+      preparedSenders.incl(senderDiscordId)
+
+    let textBody = msg{"content"}.getStr("").strip()
+    let attachments = discordMessageAttachments(msg)
+    var firstEventId = ""
+    var firstAttachmentId = ""
+    var sentAny = false
+
+    if textBody.len > 0:
+      let txnId = "discord_dm_" & rec.key.channelId & "_" & discordMsgId & "_text"
+      let sentText = api.matrixSendRoomMessageAsUser(rec.mxid, senderMxid, txnId, textBody)
+      if sentText.ok:
+        sentAny = true
+        firstEventId = sentText.eventId
+      else:
+        warn("Failed to bridge Discord text " & discordMsgId & " into room " & rec.mxid & ": " & sentText.err)
+
+    var attIdx = 0
+    for att in attachments:
+      let content = buildMatrixAttachmentContent(att)
+      if content.kind != JObject:
+        continue
+      let attachmentId = att{"id"}.getStr($attIdx)
+      let txnId = "discord_dm_" & rec.key.channelId & "_" & discordMsgId & "_att_" & $attIdx
+      inc attIdx
+      let sentAtt = api.matrixSendRoomEventAsUser(
+        roomId = rec.mxid,
+        senderMxid = senderMxid,
+        eventType = "m.room.message",
+        txnId = txnId,
+        content = content
+      )
+      if not sentAtt.ok:
+        warn("Failed to bridge Discord attachment " & discordMsgId & " into room " & rec.mxid & ": " & sentAtt.err)
+        continue
+      sentAny = true
+      if firstEventId.len == 0:
+        firstEventId = sentAtt.eventId
+      if firstAttachmentId.len == 0:
+        firstAttachmentId = attachmentId
+
+    if not sentAny:
+      let fallbackBody = messageBodyForMatrix(msg)
+      if fallbackBody.len == 0:
+        continue
+      let txnId = "discord_dm_" & rec.key.channelId & "_" & discordMsgId & "_fallback"
+      let sentFallback = api.matrixSendRoomMessageAsUser(rec.mxid, senderMxid, txnId, fallbackBody)
+      if not sentFallback.ok:
+        warn("Failed to bridge Discord message " & discordMsgId & " into room " & rec.mxid & ": " & sentFallback.err)
+        continue
+      sentAny = true
+      firstEventId = sentFallback.eventId
+
+    if not sentAny or firstEventId.len == 0:
+      continue
+
+    try:
+      api.runtime.db.insertMessage(MessageRecord(
+        discordId: discordMsgId,
+        attachmentId: firstAttachmentId,
+        channelId: rec.key.channelId,
+        channelReceiver: rec.key.receiver,
+        senderId: senderDiscordId,
+        timestampMs: nowMs(),
+        editTimestampNs: 0,
+        threadId: "",
+        mxid: firstEventId,
+        senderMxid: senderMxid
+      ))
+      inc synced
+    except CatchableError as e:
+      warn("Failed to store Discord message mapping " & discordMsgId & ": " & e.msg)
+  synced
+
+proc bridgeInfoForPrivateChannel(
+    api: ProvisioningApi,
+    channelId, name: string,
+    channelType: int
+): tuple[stateKey: string, content: JsonNode] =
+  var bridgeInfo = %*{
+    "bridgebot": api.appserviceBotUserId(),
+    "creator": api.appserviceBotUserId(),
+    "protocol": {
+      "id": "discordgo",
+      "displayname": "Discord",
+      "external_url": "https://discord.com/"
+    },
+    "channel": {
+      "id": channelId,
+      "displayname": name,
+      "external_url": "https://discord.com/channels/@me/" & channelId
+    }
+  }
+  let roomType = channelTypeName(channelType)
+  if roomType.len > 0:
+    let roomTypeLegacy = if roomType == "group_dm": "dm" else: roomType
+    bridgeInfo["com.beeper.room_type"] = %roomTypeLegacy
+    bridgeInfo["com.beeper.room_type.v2"] = %roomType
+  result = ("fi.mau.discord://discord/dm/" & channelId, bridgeInfo)
+
+proc bootstrapPrivateChannelIdentity(
+    api: ProvisioningApi,
+    roomId: string,
+    displayName: string,
+    recipient: DiscordRecipientInfo
+) =
+  if roomId.len == 0:
+    return
+  if displayName.len > 0:
+    discard api.matrixSetRoomNameAsBot(roomId, displayName)
+  if recipient.avatarUrl.len > 0:
+    discard api.matrixSetRoomAvatarAsBot(roomId, recipient.avatarUrl)
+
+  if recipient.id.len == 0:
+    return
+  let ghostMxid = api.appservicePuppetUserId(recipient.id)
+  if ghostMxid.len == 0:
+    return
+  if not api.matrixEnsureRegistered(ghostMxid):
+    return
+  if displayName.len > 0:
+    discard api.matrixSetDisplayName(ghostMxid, displayName)
+  if recipient.avatarUrl.len > 0:
+    discard api.matrixSetAvatar(ghostMxid, recipient.avatarUrl)
+  discard api.matrixInviteUser(roomId, ghostMxid)
+  discard api.matrixJoinRoom(roomId, ghostMxid)
+
+proc bootstrapPrivateChannels(api: ProvisioningApi, user: UserRecord, logLinkedOnly = true) =
+  if not api.runtimeManagersReady() or user.discordToken.len == 0:
+    return
+
+  info("[provisioning] bootstrapPrivateChannels start mxid=" & user.mxid)
+
+  let fetched = newDiscordRestClient(user.discordToken).getPrivateChannels()
+  if not fetched.ok:
+    warn("Failed to fetch Discord private channels for " & user.mxid & ": " & fetched.err)
+    return
+  if fetched.body.kind != JArray:
+    warn("Discord private channels response is not an array for " & user.mxid)
+    return
+
+  info("[provisioning] fetched private channels count=" & $fetched.body.len & " mxid=" & user.mxid)
+
+  var created = 0
+  var linked = 0
+  var messageSynced = 0
+  for channel in fetched.body:
+    if channel.kind != JObject:
+      continue
+    let channelId = channel{"id"}.getStr("")
+    if channelId.len == 0:
+      continue
+    let channelType = channel{"type"}.getInt(0)
+    if channelType notin [1, 3]:
+      continue
+
+    info("[provisioning] syncing private channel id=" & channelId & " type=" & $channelType & " mxid=" & user.mxid)
+
+    let key = PortalKey(channelId: channelId, receiver: "")
+    let existing = api.runtime.db.getPortalByID(key)
+    var rec =
+      if existing.found:
+        existing.rec
+      else:
+        newPortalRecord(key, channelType)
+    rec.portalType = channelType
+    let recipient = resolvePrimaryRecipient(channel, user.discordId)
+    rec.otherUserId = resolveOtherUserId(channel, user.discordId)
+    let displayName = resolvePrivateChannelName(channel, user.discordId)
+    rec.plainName = displayName
+    rec.name = displayName
+    if channelType == 1:
+      rec.avatarUrl = recipient.avatarUrl
+      rec.avatarSet = false
+
+    if rec.mxid.len == 0:
+      let (bridgeStateKey, bridgeInfo) = api.bridgeInfoForPrivateChannel(channelId, displayName, channelType)
+      var creationContent = newJObject()
+      if not api.cfg.bridge.federateRooms:
+        creationContent["m.federate"] = %false
+      var initialState = %*[
+        {"type": "m.bridge", "state_key": bridgeStateKey, "content": bridgeInfo},
+        {"type": "uk.half-shot.bridge", "state_key": bridgeStateKey, "content": bridgeInfo}
+      ]
+      if channelType == 1 and recipient.avatarUrl.len > 0:
+        initialState.add(%*{
+          "type": "m.room.avatar",
+          "content": {"url": recipient.avatarUrl}
+        })
+      let roomReq = %*{
+        "visibility": "private",
+        "name": displayName,
+        "preset": "private_chat",
+        "is_direct": channelType == 1,
+        "invite": [user.mxid],
+        "initial_state": initialState,
+        "creation_content": creationContent,
+        "room_version": "11"
+      }
+      let createdRoom = api.matrixCreateRoomAsBot(roomReq)
+      if not createdRoom.ok:
+        warn("Failed to create Matrix room for Discord channel " & channelId & ": " & createdRoom.err)
+        continue
+      rec.mxid = createdRoom.roomId
+      rec.nameSet = true
+      inc created
+    inc linked
+    if existing.found:
+      api.runtime.db.updatePortal(rec)
+    else:
+      api.runtime.db.insertPortal(rec)
+    if channelType == 1:
+      api.bootstrapPrivateChannelIdentity(rec.mxid, displayName, recipient)
+      messageSynced += api.syncPrivateChannelMessages(user, rec, onlyNew = not logLinkedOnly)
+    if api.runtime.db != nil:
+      api.runtime.db.markUserInPortal(UserPortalRecord(
+        discordId: channelId,
+        userMxid: user.mxid,
+        portalType: "dm",
+        inSpace: false,
+        timestampMs: nowMs()
+      ))
+
+  let shouldLog =
+    if logLinkedOnly:
+      created > 0 or linked > 0 or messageSynced > 0
+    else:
+      created > 0 or messageSynced > 0
+  if shouldLog:
+    info(
+      "Bootstrapped Discord private channels for " & user.mxid &
+      ": created=" & $created &
+      " linked=" & $linked &
+      " synced_messages=" & $messageSynced
+    )
+  info("[provisioning] bootstrapPrivateChannels done mxid=" & user.mxid)
+
+proc startPrivateChannelPolling(api: ProvisioningApi, mxid: string)
+proc runPrivateChannelPolling(api: ProvisioningApi, mxid: string): Future[void] {.async.}
+
+proc startPrivateChannelPolling(api: ProvisioningApi, mxid: string) =
+  if not api.runtimeManagersReady() or mxid.len == 0:
+    return
+  var shouldStart = false
+  withLock api.lock:
+    if mxid notin api.pollingUsers:
+      api.pollingUsers.incl(mxid)
+      shouldStart = true
+  if shouldStart:
+    asyncCheck api.runPrivateChannelPolling(mxid)
+
+proc runPrivateChannelPolling(api: ProvisioningApi, mxid: string): Future[void] {.async.} =
+  const pollIntervalMs = 3000
+  defer:
+    withLock api.lock:
+      api.pollingUsers.excl(mxid)
+
+  while true:
+    if not api.runtimeManagersReady():
+      break
+    let current = api.runtime.db.getUserByMXID(mxid)
+    if not current.found or current.rec.discordToken.len == 0:
+      break
+    api.bootstrapPrivateChannels(current.rec, logLinkedOnly = false)
+    await sleepAsync(pollIntervalMs)
+
 proc detachDiscordIdentity(api: ProvisioningApi, owningMxid, discordId: string) =
   if discordId.len == 0:
     return
@@ -199,8 +1009,8 @@ proc detachDiscordIdentity(api: ProvisioningApi, owningMxid, discordId: string) 
     discriminator: ""
   )
 
-  if api.runtime != nil:
-    let linked = api.runtime.users.getByDiscordID(discordId)
+  if api.runtime != nil and api.runtime.db != nil:
+    let linked = api.runtime.db.getUserByDiscordID(discordId)
     if linked.found and linked.rec.mxid != owningMxid:
       var detached = linked.rec
       detached.discordId = ""
@@ -226,6 +1036,75 @@ proc detachDiscordIdentity(api: ProvisioningApi, owningMxid, discordId: string) 
   detached.heartbeatSessionJson = sessionStateJson(reset)
   api.storeSessionState(detachMxid, reset)
   api.storeUser(detached)
+
+proc handleDiscordChatAction(api: ProvisioningApi, user: UserRecord, body: string): ProvisioningResult =
+  if user.discordToken.len == 0:
+    return provisioningResult(Http409, errorResponse("You're not connected to discord", ErrCodeNotConnected))
+  if api.runtime == nil or api.runtime.db == nil:
+    return provisioningResult(Http500, errorResponse("Bridge runtime is unavailable", ErrCodeConnectFailed))
+
+  var payload: JsonNode = newJObject()
+  try:
+    payload = parseJson(body)
+  except CatchableError:
+    return provisioningResult(Http400, errorResponse("Failed to parse request body", ErrCodeBadJson))
+
+  if payload.kind != JObject:
+    return provisioningResult(Http400, errorResponse("Failed to parse request body", ErrCodeBadJson))
+
+  let roomId = payload{"room_id"}.getStr("").strip()
+  let action = payload{"action"}.getStr("").strip().toLowerAscii()
+  if roomId.len == 0 or action.len == 0:
+    return provisioningResult(Http400, errorResponse("room_id and action are required", ErrCodeBadJson))
+  if action notin ["close-dm", "block", "remove-friend"]:
+    return provisioningResult(Http400, errorResponse("unsupported action", ErrCodeBadJson))
+
+  let portal = api.runtime.db.getPortalByMXID(roomId)
+  if not portal.found:
+    return provisioningResult(Http404, errorResponse("Portal not found for room", ErrCodeNotFound))
+
+  let rec = portal.rec
+  if rec.key.channelId.len == 0:
+    return provisioningResult(Http404, errorResponse("Portal missing Discord channel ID", ErrCodeNotFound))
+  if not api.runtime.db.isUserInPortal(user.mxid, rec.key.channelId):
+    return provisioningResult(Http404, errorResponse("Portal is not linked for this user", ErrCodeNotFound))
+  if rec.portalType != 1 and rec.portalType != 3:
+    return provisioningResult(Http400, errorResponse("Chat action is only available for Discord DMs", ErrCodeBadJson))
+
+  let rest = newDiscordRestClient(user.discordToken)
+  var restResult: DiscordRestResult = (ok: false, status: 0, body: newJNull(), err: "")
+  case action
+  of "close-dm":
+    restResult = rest.closePrivateChannel(rec.key.channelId)
+  of "block":
+    if rec.portalType != 1:
+      return provisioningResult(Http400, errorResponse("Block is only available in 1:1 DMs", ErrCodeBadJson))
+    if rec.otherUserId.len == 0:
+      return provisioningResult(Http400, errorResponse("Cannot block: DM user is unknown", ErrCodeBadJson))
+    restResult = rest.blockUser(rec.otherUserId)
+  of "remove-friend":
+    if rec.portalType != 1:
+      return provisioningResult(Http400, errorResponse("Remove friend is only available in 1:1 DMs", ErrCodeBadJson))
+    if rec.otherUserId.len == 0:
+      return provisioningResult(Http400, errorResponse("Cannot remove friend: DM user is unknown", ErrCodeBadJson))
+    restResult = rest.removeFriend(rec.otherUserId)
+  else:
+    discard
+
+  if not restResult.ok:
+    let detail = if restResult.err.len > 0: restResult.err else: "Discord API request failed"
+    return provisioningResult(Http502, errorResponse(detail, ErrCodeConnectFailed))
+
+  if action == "close-dm":
+    api.runtime.db.markUserNotInPortal(user.mxid, rec.key.channelId)
+
+  let statusText =
+    case action
+    of "close-dm": "Closed Discord DM"
+    of "block": "Blocked Discord user"
+    of "remove-friend": "Removed Discord friend"
+    else: "Discord action completed"
+  provisioningResult(Http200, successResponse(statusText))
 
 proc subPath(api: ProvisioningApi, fullPath: string): tuple[handled: bool, sub: string] =
   let prefix = api.cfg.bridge.provisioning.prefix.strip()
@@ -259,6 +1138,11 @@ proc handleRequest*(
   var session = api.getSessionState(user.mxid)
 
   if reqMethod == HttpGet and sub == "/v1/ping":
+    if api.runtimeManagersReady() and user.discordToken.len > 0:
+      let existingPortals = api.runtime.db.getUserPortals(user.mxid)
+      if existingPortals.len == 0:
+        api.bootstrapPrivateChannels(user)
+      api.startPrivateChannelPolling(user.mxid)
     return provisioningResult(Http200, pingResponse(
       user.mxid,
       user.managementRoom,
@@ -314,8 +1198,10 @@ proc handleRequest*(
     user.heartbeatSessionJson = sessionStateJson(session)
     api.storeSessionState(user.mxid, session)
     api.storeUser(user)
-    if api.runtime != nil and api.runtime.userStartup != nil:
-      api.runtime.userStartup.startUsers()
+    if api.runtimeManagersReady():
+      api.bootstrapPrivateChannels(user)
+      api.startPrivateChannelPolling(user.mxid)
+    # Startup coordinator already runs on bridge startup; avoid re-entry here.
     return provisioningResult(Http200, successResponse("Connected to Discord"))
 
   if reqMethod == HttpGet and sub == "/v1/login/qr":
@@ -324,6 +1210,7 @@ proc handleRequest*(
     return provisioningResult(Http400, errorResponse("QR login requires websocket upgrade", ErrCodeLoginPrepareFailed))
 
   if reqMethod == HttpPost and sub == "/v1/login/token":
+    info("[provisioning] /v1/login/token request user_id=" & user.mxid & " runtimeReady=" & $(api.runtimeManagersReady()))
     if user.discordToken.len > 0:
       return provisioningResult(Http409, errorResponse("You're already logged into Discord", ErrCodeAlreadyLoggedIn))
 
@@ -340,9 +1227,11 @@ proc handleRequest*(
     if token.len == 0:
       return provisioningResult(Http401, errorResponse("Failed to connect to Discord", ErrCodePostLoginConnFailed))
 
+    info("[provisioning] /v1/login/token verifying token for " & user.mxid)
     let verified = api.verifyDiscordToken(token)
     if not verified.ok:
       return provisioningResult(Http401, errorResponse("Failed to connect to Discord", ErrCodePostLoginConnFailed))
+    info("[provisioning] /v1/login/token token verified for " & user.mxid)
 
     user.discordToken = token
     if verified.discordId.len > 0:
@@ -361,11 +1250,22 @@ proc handleRequest*(
     session.lastHeartbeatSent = ts
     session.lastHeartbeatAck = ts
     user.heartbeatSessionJson = sessionStateJson(session)
+    info("[provisioning] /v1/login/token storing user/session for " & user.mxid)
     api.storeSessionState(user.mxid, session)
     api.storeUser(user)
-    if api.runtime != nil and api.runtime.userStartup != nil:
-      api.runtime.userStartup.startUsers()
+    info("[provisioning] /v1/login/token stored user/session for " & user.mxid)
+    if api.runtimeManagersReady():
+      info("[provisioning] /v1/login/token bootstrap start for " & user.mxid)
+      api.bootstrapPrivateChannels(user)
+      info("[provisioning] /v1/login/token bootstrap done for " & user.mxid)
+      api.startPrivateChannelPolling(user.mxid)
+      info("[provisioning] /v1/login/token polling started for " & user.mxid)
+    # Startup coordinator already runs on bridge startup; avoid re-entry here.
+    info("[provisioning] /v1/login/token success for " & user.mxid)
     return provisioningResult(Http200, loginResponse(user.discordId, session.username, session.discriminator))
+
+  if reqMethod == HttpPost and sub == "/v1/discord/chat_action":
+    return api.handleDiscordChatAction(user, body)
 
   if reqMethod == HttpGet and sub == "/v1/guilds":
     return provisioningResult(Http200, %*{"guilds": []})
@@ -427,6 +1327,8 @@ proc handleQrLoginWs(api: ProvisioningApi, req: Request, uid: string): Future[vo
     user.heartbeatSessionJson = sessionStateJson(session)
     api.storeSessionState(user.mxid, session)
     api.storeUser(user)
+    api.bootstrapPrivateChannels(user)
+    api.startPrivateChannelPolling(user.mxid)
 
     if qrCodes.len == 0:
       discard await ws.sendJson(%*{
@@ -447,6 +1349,7 @@ proc newProvisioningApi*(cfg: Config, runtime: DiscordBridgeRuntime = nil): Prov
   result.runtime = runtime
   result.sessions = initTable[string, UserSessionState]()
   result.localUsers = initTable[string, UserRecord]()
+  result.pollingUsers = initHashSet[string]()
   result.runQrLogin = proc(timeoutMs: int, onQrCode: proc(url: string) {.closure, gcsafe.}): Future[RemoteAuthLoginResult] {.async, gcsafe.} =
     await runRemoteAuthLogin(timeoutMs, onQrCode)
   result.verifyDiscordToken = verifyDiscordTokenWithRest
