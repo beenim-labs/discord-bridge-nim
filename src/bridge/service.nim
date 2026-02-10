@@ -202,5 +202,7 @@ proc close*(svc: DiscordBridgeService) =
 proc run*(svc: DiscordBridgeService) =
   if svc.runtime != nil:
     svc.runtime.start()
+  if svc.provisioning != nil:
+    svc.provisioning.resumePersistedDiscordSessions()
   info(fmt"Starting bridge-discord-nim as {svc.cfg.appservice.id} on {svc.cfg.appservice.hostname}:{svc.cfg.appservice.port}")
   waitFor svc.appservice.runForever()

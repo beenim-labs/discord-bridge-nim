@@ -1,6 +1,8 @@
-import std/[httpcore, json, unittest]
+import std/[httpcore, json, os, times, unittest]
 import config/config
 import provisioning/[contracts, server]
+import database/database
+import bridge/runtime
 
 proc newTestApi(): ProvisioningApi =
   var cfg = defaultConfig()
@@ -36,6 +38,27 @@ proc call(
     wsProtocol = ""
 ): ProvisioningResult =
   api.handleRequest(reqMethod, path, query, makeHeaders(authHeader, wsProtocol), body)
+
+proc openRuntimeApi(name: string): tuple[api: ProvisioningApi, dbPath: string] =
+  let dbPath = "tests/fixtures/" & name & "-" & $getTime().toUnix() & "-" & $epochTime().int64 & ".db"
+  let db = openBridgeDb("file:" & dbPath, "sqlite")
+  var cfg = defaultConfig()
+  cfg.bridge.provisioning.prefix = "/_matrix/provision"
+  cfg.bridge.provisioning.sharedSecret = "secret"
+  cfg.homeserver.address = "http://127.0.0.1:9"
+  let rt = newDiscordBridgeRuntime(cfg, db)
+  result = (newProvisioningApi(cfg, rt), dbPath)
+  result.api.verifyDiscordToken = proc(token: string): tuple[
+    ok: bool,
+    discordId: string,
+    username: string,
+    discriminator: string,
+    err: string
+  ] =
+    if token.len == 0 or token == "bad":
+      (false, "", "", "", "invalid token")
+    else:
+      (true, "123", "alice", "0001", "")
 
 suite "provisioning":
   test "auth required":
@@ -143,3 +166,13 @@ suite "provisioning":
     let disabled = newProvisioningApi(cfg)
     let res = disabled.handleRequest(HttpGet, "/_matrix/provision/v1/ping", "", makeHeaders(), "")
     check not res.handled
+
+  test "runtime-backed token login does not crash when bootstrap fails":
+    let opened = openRuntimeApi("provisioning-runtime")
+    defer:
+      if fileExists(opened.dbPath):
+        removeFile(opened.dbPath)
+
+    let ok = opened.api.call(HttpPost, "/_matrix/provision/v1/login/token", body = """{"token":"MTIz.abc.xyz"}""")
+    check ok.code == Http200
+    check ok.payload["success"].getBool()

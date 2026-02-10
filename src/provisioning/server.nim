@@ -129,7 +129,7 @@ proc verifyDiscordTokenWithRest(token: string): tuple[
   let me = newDiscordRestClient(token).getCurrentUser()
   if not me.ok:
     return (false, "", "", "", if me.err.len > 0: me.err else: "discord auth failed")
-  if me.body.kind != JObject:
+  if me.body.isNil or me.body.kind != JObject:
     return (false, "", "", "", "discord auth response missing user object")
   (
     true,
@@ -241,7 +241,7 @@ proc matrixClientRequestAsUser(
   http.headers = newHttpHeaders({"Content-Type": "application/json"})
   try:
     let resp =
-      if payload.kind != JNull:
+      if not payload.isNil and payload.kind != JNull:
         http.request(endpoint, httpMethod, body = $payload)
       else:
         http.request(endpoint, httpMethod)
@@ -265,7 +265,7 @@ proc matrixClientRequestAsUser(
     (false, 0, newJNull(), "", e.msg)
 
 proc matrixErrCode(resp: tuple[ok: bool, status: int, body: JsonNode, raw: string, err: string]): string =
-  if resp.body.kind != JObject:
+  if resp.body.isNil or resp.body.kind != JObject:
     return ""
   resp.body{"errcode"}.getStr("").toUpperAscii()
 
@@ -451,6 +451,8 @@ proc attachmentMsgType(contentType, fileName: string): string =
 
 proc discordMessageAttachments(msg: JsonNode): seq[JsonNode] =
   result = @[]
+  if msg.isNil or msg.kind != JObject:
+    return
   if not msg.hasKey("attachments") or msg["attachments"].kind != JArray:
     return
   for att in msg["attachments"]:
@@ -458,6 +460,8 @@ proc discordMessageAttachments(msg: JsonNode): seq[JsonNode] =
       result.add(att)
 
 proc buildMatrixAttachmentContent(att: JsonNode): JsonNode =
+  if att.isNil or att.kind != JObject:
+    return newJNull()
   let fileName = att{"filename"}.getStr("Attachment")
   let url = att{"url"}.getStr("").strip()
   let proxyUrl = att{"proxy_url"}.getStr("").strip()
@@ -606,6 +610,8 @@ proc sortDiscordMessagesAscending(messages: var seq[JsonNode]) =
   )
 
 proc messageBodyForMatrix(msg: JsonNode): string =
+  if msg.isNil or msg.kind != JObject:
+    return ""
   let content = msg{"content"}.getStr("").strip()
   if content.len > 0:
     return content
@@ -659,7 +665,7 @@ proc syncPrivateChannelMessages(
       if not fetched.ok:
         warn("Failed to fetch Discord messages for channel " & rec.key.channelId & ": " & fetched.err)
         break
-      if fetched.body.kind != JArray:
+      if fetched.body.isNil or fetched.body.kind != JArray:
         warn("Discord messages response is not an array for channel " & rec.key.channelId)
         break
       if fetched.body.len == 0:
@@ -680,7 +686,7 @@ proc syncPrivateChannelMessages(
       if not fetched.ok:
         warn("Failed to fetch Discord messages for channel " & rec.key.channelId & ": " & fetched.err)
         break
-      if fetched.body.kind != JArray:
+      if fetched.body.isNil or fetched.body.kind != JArray:
         warn("Discord messages response is not an array for channel " & rec.key.channelId)
         break
       if fetched.body.len == 0:
@@ -708,6 +714,8 @@ proc syncPrivateChannelMessages(
       continue
 
     let author = msg{"author"}
+    if author.isNil or author.kind != JObject:
+      continue
     let senderDiscordId = author{"id"}.getStr("")
     if senderDiscordId.len == 0:
       continue
@@ -868,7 +876,7 @@ proc bootstrapPrivateChannels(api: ProvisioningApi, user: UserRecord, logLinkedO
   if not fetched.ok:
     warn("Failed to fetch Discord private channels for " & user.mxid & ": " & fetched.err)
     return
-  if fetched.body.kind != JArray:
+  if fetched.body.isNil or fetched.body.kind != JArray:
     warn("Discord private channels response is not an array for " & user.mxid)
     return
 
@@ -1037,6 +1045,70 @@ proc detachDiscordIdentity(api: ProvisioningApi, owningMxid, discordId: string) 
   api.storeSessionState(detachMxid, reset)
   api.storeUser(detached)
 
+proc markSessionConnected(
+    api: ProvisioningApi,
+    user: var UserRecord,
+    session: var UserSessionState,
+    verifiedDiscordId: string,
+    verifiedUsername: string,
+    verifiedDiscriminator: string
+) =
+  if verifiedDiscordId.len > 0:
+    api.detachDiscordIdentity(user.mxid, verifiedDiscordId)
+    user.discordId = verifiedDiscordId
+  elif user.discordId.len == 0:
+    let guessedDiscordId = discordIdFromToken(user.discordToken)
+    if guessedDiscordId.len > 0:
+      api.detachDiscordIdentity(user.mxid, guessedDiscordId)
+      user.discordId = guessedDiscordId
+
+  if verifiedUsername.len > 0:
+    session.username = verifiedUsername
+  if verifiedDiscriminator.len > 0:
+    session.discriminator = verifiedDiscriminator
+
+  let ts = nowMs()
+  session.connected = true
+  session.lastHeartbeatSent = ts
+  session.lastHeartbeatAck = ts
+  user.heartbeatSessionJson = sessionStateJson(session)
+  api.storeSessionState(user.mxid, session)
+  api.storeUser(user)
+
+proc resumePersistedDiscordSessions*(api: ProvisioningApi) =
+  if api == nil or not api.runtimeManagersReady():
+    return
+
+  let usersWithToken = api.runtime.db.getAllUsersWithToken()
+  if usersWithToken.len == 0:
+    info("[provisioning] startup resume: no stored Discord sessions")
+    return
+
+  var resumed = 0
+  var failed = 0
+  for rec in usersWithToken:
+    if rec.mxid.len == 0:
+      continue
+    let token = rec.discordToken.strip()
+    if token.len == 0:
+      continue
+
+    var user = rec
+    user.discordToken = token
+    var session = api.getSessionState(user.mxid)
+    let verified = api.verifyDiscordToken(token)
+    if not verified.ok:
+      inc failed
+      warn("[provisioning] startup resume failed for " & user.mxid & ": " & verified.err)
+      continue
+
+    api.markSessionConnected(user, session, verified.discordId, verified.username, verified.discriminator)
+    api.bootstrapPrivateChannels(user, logLinkedOnly = false)
+    api.startPrivateChannelPolling(user.mxid)
+    inc resumed
+
+  info("[provisioning] startup resume complete: resumed=" & $resumed & " failed=" & $failed)
+
 proc handleDiscordChatAction(api: ProvisioningApi, user: UserRecord, body: string): ProvisioningResult =
   if user.discordToken.len == 0:
     return provisioningResult(Http409, errorResponse("You're not connected to discord", ErrCodeNotConnected))
@@ -1049,14 +1121,15 @@ proc handleDiscordChatAction(api: ProvisioningApi, user: UserRecord, body: strin
   except CatchableError:
     return provisioningResult(Http400, errorResponse("Failed to parse request body", ErrCodeBadJson))
 
-  if payload.kind != JObject:
+  if payload.isNil or payload.kind != JObject:
     return provisioningResult(Http400, errorResponse("Failed to parse request body", ErrCodeBadJson))
 
   let roomId = payload{"room_id"}.getStr("").strip()
   let action = payload{"action"}.getStr("").strip().toLowerAscii()
+  let eventId = payload{"event_id"}.getStr("").strip()
   if roomId.len == 0 or action.len == 0:
     return provisioningResult(Http400, errorResponse("room_id and action are required", ErrCodeBadJson))
-  if action notin ["close-dm", "block", "remove-friend"]:
+  if action notin ["close-dm", "block", "remove-friend", "remove-message"]:
     return provisioningResult(Http400, errorResponse("unsupported action", ErrCodeBadJson))
 
   let portal = api.runtime.db.getPortalByMXID(roomId)
@@ -1088,6 +1161,22 @@ proc handleDiscordChatAction(api: ProvisioningApi, user: UserRecord, body: strin
     if rec.otherUserId.len == 0:
       return provisioningResult(Http400, errorResponse("Cannot remove friend: DM user is unknown", ErrCodeBadJson))
     restResult = rest.removeFriend(rec.otherUserId)
+  of "remove-message":
+    if eventId.len == 0:
+      return provisioningResult(Http400, errorResponse("event_id is required for remove-message", ErrCodeBadJson))
+    let mapped = api.runtime.db.getMessageByMXID(rec.key, eventId)
+    if not mapped.found:
+      return provisioningResult(Http404, errorResponse("Message mapping not found for event", ErrCodeNotFound))
+    if mapped.rec.discordId.len == 0:
+      return provisioningResult(Http404, errorResponse("Discord message ID not found for event", ErrCodeNotFound))
+    restResult = rest.deleteMessage(rec.key.channelId, mapped.rec.discordId)
+    if restResult.ok:
+      let siblings = api.runtime.db.getMessagesByDiscordID(rec.key, mapped.rec.discordId)
+      if siblings.len == 0:
+        api.runtime.db.deleteMessage(mapped.rec)
+      else:
+        for sibling in siblings:
+          api.runtime.db.deleteMessage(sibling)
   else:
     discard
 
@@ -1103,6 +1192,7 @@ proc handleDiscordChatAction(api: ProvisioningApi, user: UserRecord, body: strin
     of "close-dm": "Closed Discord DM"
     of "block": "Blocked Discord user"
     of "remove-friend": "Removed Discord friend"
+    of "remove-message": "Removed Discord message"
     else: "Discord action completed"
   provisioningResult(Http200, successResponse(statusText))
 
@@ -1212,7 +1302,25 @@ proc handleRequest*(
   if reqMethod == HttpPost and sub == "/v1/login/token":
     info("[provisioning] /v1/login/token request user_id=" & user.mxid & " runtimeReady=" & $(api.runtimeManagersReady()))
     if user.discordToken.len > 0:
-      return provisioningResult(Http409, errorResponse("You're already logged into Discord", ErrCodeAlreadyLoggedIn))
+      let existing = api.verifyDiscordToken(user.discordToken)
+      if existing.ok:
+        var existingSession = api.getSessionState(user.mxid)
+        api.markSessionConnected(user, existingSession, existing.discordId, existing.username, existing.discriminator)
+        if api.runtimeManagersReady():
+          api.bootstrapPrivateChannels(user, logLinkedOnly = false)
+          api.startPrivateChannelPolling(user.mxid)
+        return provisioningResult(Http200, loginResponse(user.discordId, existingSession.username, existingSession.discriminator))
+      user.discordToken = ""
+      user.discordId = ""
+      var reset = api.getSessionState(user.mxid)
+      reset.connected = false
+      reset.lastHeartbeatAck = 0
+      reset.lastHeartbeatSent = 0
+      reset.username = ""
+      reset.discriminator = ""
+      user.heartbeatSessionJson = sessionStateJson(reset)
+      api.storeSessionState(user.mxid, reset)
+      api.storeUser(user)
 
     var payload: JsonNode = newJObject()
     try:
@@ -1220,7 +1328,7 @@ proc handleRequest*(
     except CatchableError:
       return provisioningResult(Http400, errorResponse("Failed to parse request body", ErrCodeBadJson))
 
-    if payload.kind != JObject or not payload.hasKey("token") or payload["token"].kind != JString:
+    if payload.isNil or payload.kind != JObject or not payload.hasKey("token") or payload["token"].kind != JString:
       return provisioningResult(Http400, errorResponse("Failed to parse request body", ErrCodeBadJson))
 
     let token = payload["token"].getStr().strip()
@@ -1234,25 +1342,8 @@ proc handleRequest*(
     info("[provisioning] /v1/login/token token verified for " & user.mxid)
 
     user.discordToken = token
-    if verified.discordId.len > 0:
-      api.detachDiscordIdentity(user.mxid, verified.discordId)
-      user.discordId = verified.discordId
-    session.username = verified.username
-    session.discriminator = verified.discriminator
-    if user.discordId.len == 0:
-      let guessedDiscordId = discordIdFromToken(token)
-      if guessedDiscordId.len > 0:
-        api.detachDiscordIdentity(user.mxid, guessedDiscordId)
-        user.discordId = guessedDiscordId
-
-    let ts = nowMs()
-    session.connected = true
-    session.lastHeartbeatSent = ts
-    session.lastHeartbeatAck = ts
-    user.heartbeatSessionJson = sessionStateJson(session)
+    api.markSessionConnected(user, session, verified.discordId, verified.username, verified.discriminator)
     info("[provisioning] /v1/login/token storing user/session for " & user.mxid)
-    api.storeSessionState(user.mxid, session)
-    api.storeUser(user)
     info("[provisioning] /v1/login/token stored user/session for " & user.mxid)
     if api.runtimeManagersReady():
       info("[provisioning] /v1/login/token bootstrap start for " & user.mxid)
