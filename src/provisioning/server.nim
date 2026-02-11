@@ -384,6 +384,27 @@ proc matrixSetRoomAvatarAsBot(api: ProvisioningApi, roomId, avatarUrl: string): 
     warn("Failed to set room avatar for " & roomId & ": " & resp.err)
   resp.ok
 
+proc matrixRoomMissingForBot(api: ProvisioningApi, roomId: string): bool =
+  if roomId.len == 0:
+    return true
+  let botUser = api.appserviceBotUserId()
+  let resp = api.matrixClientRequestAsUser(
+    actingUser = botUser,
+    httpMethod = HttpGet,
+    path = "/_matrix/client/v3/rooms/" & encodeUrl(roomId) & "/state"
+  )
+  if resp.ok:
+    return false
+  if resp.status == 404:
+    return true
+  let errCode = resp.matrixErrCode()
+  if errCode == "M_NOT_FOUND":
+    return true
+  let lowerErr = resp.err.toLowerAscii()
+  if "not found" in lowerErr:
+    return true
+  false
+
 proc matrixSendRoomEventAsUser(
     api: ProvisioningApi,
     roomId, senderMxid, eventType, txnId: string,
@@ -904,6 +925,13 @@ proc bootstrapPrivateChannels(api: ProvisioningApi, user: UserRecord, logLinkedO
         existing.rec
       else:
         newPortalRecord(key, channelType)
+    if existing.found and rec.mxid.len > 0 and api.matrixRoomMissingForBot(rec.mxid):
+      warn("[provisioning] stale portal room detected for channel " & channelId &
+        " mxid=" & rec.mxid & ", recreating")
+      rec.mxid = ""
+      rec.nameSet = false
+      rec.topicSet = false
+      rec.avatarSet = false
     rec.portalType = channelType
     let recipient = resolvePrimaryRecipient(channel, user.discordId)
     rec.otherUserId = resolveOtherUserId(channel, user.discordId)
@@ -945,6 +973,8 @@ proc bootstrapPrivateChannels(api: ProvisioningApi, user: UserRecord, logLinkedO
       rec.mxid = createdRoom.roomId
       rec.nameSet = true
       inc created
+    else:
+      discard api.matrixInviteUser(rec.mxid, user.mxid)
     inc linked
     if existing.found:
       api.runtime.db.updatePortal(rec)
@@ -991,7 +1021,7 @@ proc startPrivateChannelPolling(api: ProvisioningApi, mxid: string) =
     asyncCheck api.runPrivateChannelPolling(mxid)
 
 proc runPrivateChannelPolling(api: ProvisioningApi, mxid: string): Future[void] {.async.} =
-  const pollIntervalMs = 3000
+  const pollIntervalMs = 15000
   defer:
     withLock api.lock:
       api.pollingUsers.excl(mxid)
@@ -1002,7 +1032,10 @@ proc runPrivateChannelPolling(api: ProvisioningApi, mxid: string): Future[void] 
     let current = api.runtime.db.getUserByMXID(mxid)
     if not current.found or current.rec.discordToken.len == 0:
       break
-    api.bootstrapPrivateChannels(current.rec, logLinkedOnly = false)
+    try:
+      api.bootstrapPrivateChannels(current.rec, logLinkedOnly = false)
+    except CatchableError as e:
+      warn("[provisioning] private channel poll failed for " & mxid & ": " & e.msg)
     await sleepAsync(pollIntervalMs)
 
 proc detachDiscordIdentity(api: ProvisioningApi, owningMxid, discordId: string) =
@@ -1103,7 +1136,6 @@ proc resumePersistedDiscordSessions*(api: ProvisioningApi) =
       continue
 
     api.markSessionConnected(user, session, verified.discordId, verified.username, verified.discriminator)
-    api.bootstrapPrivateChannels(user, logLinkedOnly = false)
     api.startPrivateChannelPolling(user.mxid)
     inc resumed
 
@@ -1224,14 +1256,14 @@ proc handleRequest*(
 
   let sub = mapped.sub
   let uid = queryParam(query, "user_id")
+  if uid.len == 0:
+    return provisioningResult(Http400, errorResponse("Missing user_id query parameter", ErrCodeBadJson))
   var user = api.getOrCreateUser(uid)
   var session = api.getSessionState(user.mxid)
 
   if reqMethod == HttpGet and sub == "/v1/ping":
     if api.runtimeManagersReady() and user.discordToken.len > 0:
-      let existingPortals = api.runtime.db.getUserPortals(user.mxid)
-      if existingPortals.len == 0:
-        api.bootstrapPrivateChannels(user)
+      # Keep /ping lightweight: background poller handles room/bootstrap sync.
       api.startPrivateChannelPolling(user.mxid)
     return provisioningResult(Http200, pingResponse(
       user.mxid,
@@ -1289,7 +1321,7 @@ proc handleRequest*(
     api.storeSessionState(user.mxid, session)
     api.storeUser(user)
     if api.runtimeManagersReady():
-      api.bootstrapPrivateChannels(user)
+      # Avoid heavy synchronous bootstrap inside request handling.
       api.startPrivateChannelPolling(user.mxid)
     # Startup coordinator already runs on bridge startup; avoid re-entry here.
     return provisioningResult(Http200, successResponse("Connected to Discord"))
@@ -1307,7 +1339,7 @@ proc handleRequest*(
         var existingSession = api.getSessionState(user.mxid)
         api.markSessionConnected(user, existingSession, existing.discordId, existing.username, existing.discriminator)
         if api.runtimeManagersReady():
-          api.bootstrapPrivateChannels(user, logLinkedOnly = false)
+          # Keep token login idempotent and fast; poller performs sync.
           api.startPrivateChannelPolling(user.mxid)
         return provisioningResult(Http200, loginResponse(user.discordId, existingSession.username, existingSession.discriminator))
       user.discordToken = ""
@@ -1346,9 +1378,7 @@ proc handleRequest*(
     info("[provisioning] /v1/login/token storing user/session for " & user.mxid)
     info("[provisioning] /v1/login/token stored user/session for " & user.mxid)
     if api.runtimeManagersReady():
-      info("[provisioning] /v1/login/token bootstrap start for " & user.mxid)
-      api.bootstrapPrivateChannels(user)
-      info("[provisioning] /v1/login/token bootstrap done for " & user.mxid)
+      info("[provisioning] /v1/login/token scheduling polling sync for " & user.mxid)
       api.startPrivateChannelPolling(user.mxid)
       info("[provisioning] /v1/login/token polling started for " & user.mxid)
     # Startup coordinator already runs on bridge startup; avoid re-entry here.
@@ -1418,7 +1448,7 @@ proc handleQrLoginWs(api: ProvisioningApi, req: Request, uid: string): Future[vo
     user.heartbeatSessionJson = sessionStateJson(session)
     api.storeSessionState(user.mxid, session)
     api.storeUser(user)
-    api.bootstrapPrivateChannels(user)
+    # Keep websocket login response quick; poller handles bootstrap/sync.
     api.startPrivateChannelPolling(user.mxid)
 
     if qrCodes.len == 0:
