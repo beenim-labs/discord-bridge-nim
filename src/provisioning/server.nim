@@ -551,6 +551,20 @@ proc discordAvatarUrl(userId, avatarHash: string): string =
     return "https://cdn.discordapp.com/avatars/" & userId & "/" & avatarHash & "." & ext & "?size=128"
   "https://cdn.discordapp.com/embed/avatars/0.png"
 
+proc discordDisplayName(userObj: JsonNode): string =
+  if userObj.isNil or userObj.kind != JObject:
+    return ""
+  let globalName = userObj{"global_name"}.getStr("").strip()
+  if globalName.len > 0:
+    return globalName
+  let username = userObj{"username"}.getStr("").strip()
+  if username.len > 0:
+    return username
+  let displayName = userObj{"display_name"}.getStr("").strip()
+  if displayName.len > 0:
+    return displayName
+  ""
+
 proc resolvePrimaryRecipient(channel: JsonNode, selfDiscordId: string): DiscordRecipientInfo =
   if not channel.hasKey("recipients") or channel["recipients"].kind != JArray:
     return DiscordRecipientInfo()
@@ -562,13 +576,7 @@ proc resolvePrimaryRecipient(channel: JsonNode, selfDiscordId: string): DiscordR
     let id = recipient{"id"}.getStr("")
     if id.len == 0:
       continue
-    let displayName =
-      block:
-        let n = recipient{"global_name"}.getStr("").strip()
-        if n.len > 0:
-          n
-        else:
-          recipient{"username"}.getStr("").strip()
+    let displayName = discordDisplayName(recipient)
     let info = DiscordRecipientInfo(
       id: id,
       displayName: if displayName.len > 0: displayName else: id,
@@ -610,6 +618,71 @@ proc resolvePrivateChannelName(channel: JsonNode, selfDiscordId: string): string
     "Discord Group DM"
   else:
     "Discord DM"
+
+proc resolvePrivateChannelNameWithLookup(
+    channel: JsonNode,
+    selfDiscordId: string,
+    rest: DiscordRestClient,
+    displayNameCache: var Table[string, string]
+): string =
+  result = resolvePrivateChannelName(channel, selfDiscordId)
+  let channelType = channel{"type"}.getInt(0)
+  if channelType != 3 or result != "Discord Group DM":
+    return
+  if rest.isNil:
+    return
+  var sourceChannel = channel
+  var recipientsMissing =
+    (not sourceChannel.hasKey("recipients")) or
+    sourceChannel["recipients"].kind != JArray or
+    sourceChannel["recipients"].len == 0
+  if recipientsMissing:
+    let channelId = channel{"id"}.getStr("")
+    if channelId.len > 0:
+      let fullChannel = rest.getChannel(channelId)
+      if fullChannel.ok and fullChannel.body.kind == JObject:
+        sourceChannel = fullChannel.body
+        result = resolvePrivateChannelName(sourceChannel, selfDiscordId)
+        if result != "Discord Group DM":
+          return
+        recipientsMissing =
+          (not sourceChannel.hasKey("recipients")) or
+          sourceChannel["recipients"].kind != JArray or
+          sourceChannel["recipients"].len == 0
+  if recipientsMissing:
+    return
+
+  var names: seq[string] = @[]
+  var seenIds = initHashSet[string]()
+  for recipient in sourceChannel["recipients"]:
+    if recipient.kind != JObject:
+      continue
+    let id = recipient{"id"}.getStr("")
+    if id.len == 0:
+      continue
+    if selfDiscordId.len > 0 and id == selfDiscordId:
+      continue
+    if id in seenIds:
+      continue
+    seenIds.incl(id)
+
+    let inlineName = discordDisplayName(recipient)
+    if inlineName.len > 0:
+      displayNameCache[id] = inlineName
+      names.add(inlineName)
+      continue
+
+    var lookedUp = displayNameCache.getOrDefault(id, "")
+    if lookedUp.len == 0:
+      let userResp = rest.getUser(id)
+      if userResp.ok and userResp.body.kind == JObject:
+        lookedUp = discordDisplayName(userResp.body)
+      displayNameCache[id] = lookedUp
+    if lookedUp.len > 0:
+      names.add(lookedUp)
+
+  if names.len > 0:
+    result = names.join(", ")
 
 proc resolveOtherUserId(channel: JsonNode, selfDiscordId: string): string =
   resolvePrimaryRecipient(channel, selfDiscordId).id
@@ -893,7 +966,8 @@ proc bootstrapPrivateChannels(api: ProvisioningApi, user: UserRecord, logLinkedO
 
   info("[provisioning] bootstrapPrivateChannels start mxid=" & user.mxid)
 
-  let fetched = newDiscordRestClient(user.discordToken).getPrivateChannels()
+  let rest = newDiscordRestClient(user.discordToken)
+  let fetched = rest.getPrivateChannels()
   if not fetched.ok:
     warn("Failed to fetch Discord private channels for " & user.mxid & ": " & fetched.err)
     return
@@ -903,6 +977,7 @@ proc bootstrapPrivateChannels(api: ProvisioningApi, user: UserRecord, logLinkedO
 
   info("[provisioning] fetched private channels count=" & $fetched.body.len & " mxid=" & user.mxid)
 
+  var displayNameCache = initTable[string, string]()
   var created = 0
   var linked = 0
   var messageSynced = 0
@@ -935,7 +1010,7 @@ proc bootstrapPrivateChannels(api: ProvisioningApi, user: UserRecord, logLinkedO
     rec.portalType = channelType
     let recipient = resolvePrimaryRecipient(channel, user.discordId)
     rec.otherUserId = resolveOtherUserId(channel, user.discordId)
-    let displayName = resolvePrivateChannelName(channel, user.discordId)
+    let displayName = resolvePrivateChannelNameWithLookup(channel, user.discordId, rest, displayNameCache)
     rec.plainName = displayName
     rec.name = displayName
     if channelType == 1:
@@ -983,6 +1058,11 @@ proc bootstrapPrivateChannels(api: ProvisioningApi, user: UserRecord, logLinkedO
     if channelType == 1:
       api.bootstrapPrivateChannelIdentity(rec.mxid, displayName, recipient)
       messageSynced += api.syncPrivateChannelMessages(user, rec, onlyNew = not logLinkedOnly)
+    elif channelType == 3 and displayName.len > 0:
+      # Keep existing group DM rooms renamed to the latest Discord title/participants.
+      let prevName = if existing.found: existing.rec.name else: ""
+      if not existing.found or prevName != displayName:
+        discard api.matrixSetRoomNameAsBot(rec.mxid, displayName)
     if api.runtime.db != nil:
       api.runtime.db.markUserInPortal(UserPortalRecord(
         discordId: channelId,
@@ -1133,6 +1213,21 @@ proc resumePersistedDiscordSessions*(api: ProvisioningApi) =
     if not verified.ok:
       inc failed
       warn("[provisioning] startup resume failed for " & user.mxid & ": " & verified.err)
+      let errLower = verified.err.toLowerAscii()
+      let invalidToken =
+        errLower.contains("401") or
+        errLower.contains("unauthorized") or
+        errLower.contains("invalid token")
+      session.connected = false
+      session.lastHeartbeatAck = 0
+      session.lastHeartbeatSent = 0
+      user.heartbeatSessionJson = sessionStateJson(session)
+      if invalidToken:
+        user.discordToken = ""
+        user.discordId = ""
+        warn("[provisioning] cleared invalid Discord token for " & user.mxid)
+      api.storeSessionState(user.mxid, session)
+      api.storeUser(user)
       continue
 
     api.markSessionConnected(user, session, verified.discordId, verified.username, verified.discriminator)
@@ -1161,7 +1256,7 @@ proc handleDiscordChatAction(api: ProvisioningApi, user: UserRecord, body: strin
   let eventId = payload{"event_id"}.getStr("").strip()
   if roomId.len == 0 or action.len == 0:
     return provisioningResult(Http400, errorResponse("room_id and action are required", ErrCodeBadJson))
-  if action notin ["close-dm", "block", "remove-friend", "remove-message"]:
+  if action notin ["close-dm", "block", "add-friend", "remove-friend", "remove-message"]:
     return provisioningResult(Http400, errorResponse("unsupported action", ErrCodeBadJson))
 
   let portal = api.runtime.db.getPortalByMXID(roomId)
@@ -1187,6 +1282,12 @@ proc handleDiscordChatAction(api: ProvisioningApi, user: UserRecord, body: strin
     if rec.otherUserId.len == 0:
       return provisioningResult(Http400, errorResponse("Cannot block: DM user is unknown", ErrCodeBadJson))
     restResult = rest.blockUser(rec.otherUserId)
+  of "add-friend":
+    if rec.portalType != 1:
+      return provisioningResult(Http400, errorResponse("Add friend is only available in 1:1 DMs", ErrCodeBadJson))
+    if rec.otherUserId.len == 0:
+      return provisioningResult(Http400, errorResponse("Cannot add friend: DM user is unknown", ErrCodeBadJson))
+    restResult = rest.addFriend(rec.otherUserId)
   of "remove-friend":
     if rec.portalType != 1:
       return provisioningResult(Http400, errorResponse("Remove friend is only available in 1:1 DMs", ErrCodeBadJson))
@@ -1223,6 +1324,7 @@ proc handleDiscordChatAction(api: ProvisioningApi, user: UserRecord, body: strin
     case action
     of "close-dm": "Closed Discord DM"
     of "block": "Blocked Discord user"
+    of "add-friend": "Added Discord friend"
     of "remove-friend": "Removed Discord friend"
     of "remove-message": "Removed Discord message"
     else: "Discord action completed"

@@ -85,6 +85,7 @@ type
   DiscordRelationship* = object
     id*: string
     nickname*: string
+    relType*: int
 
   DiscordReadyEvent* = object
     userId*: string
@@ -516,17 +517,22 @@ proc prunePortalList*(ctx: UserContext, beforeTimestampMs: int64) =
 # Relationship handlers
 # ===========================================================================
 
-proc handleRelationshipChange*(ctx: UserContext, userId: string, nickname: string) =
+proc isFriendRelationship(relType: int): bool =
+  ## Discord relationship type 1 = friend.
+  relType == 1
+
+proc handleRelationshipChange*(ctx: UserContext, userId: string, nickname: string, relType: int) =
   if ctx.runtime == nil or ctx.runtime.portals == nil:
     return
   let portal = ctx.runtime.portals.findPrivateChatWith(ctx.discordId, userId)
   if not portal.found:
     return
-  if nickname.len > 0:
+  if isFriendRelationship(relType):
     var rec = portal.rec
     rec.friendNick = true
-    rec.name = nickname
-    rec.nameSet = true
+    if nickname.len > 0:
+      rec.name = nickname
+      rec.nameSet = true
     ctx.runtime.portals.upsert(rec)
   else:
     var rec = portal.rec
@@ -535,15 +541,15 @@ proc handleRelationshipChange*(ctx: UserContext, userId: string, nickname: strin
 
 proc relationshipAddHandler*(ctx: UserContext, rel: DiscordRelationship) =
   ctx.relationships[rel.id] = rel
-  ctx.handleRelationshipChange(rel.id, rel.nickname)
+  ctx.handleRelationshipChange(rel.id, rel.nickname, rel.relType)
 
 proc relationshipUpdateHandler*(ctx: UserContext, rel: DiscordRelationship) =
   ctx.relationships[rel.id] = rel
-  ctx.handleRelationshipChange(rel.id, rel.nickname)
+  ctx.handleRelationshipChange(rel.id, rel.nickname, rel.relType)
 
 proc relationshipRemoveHandler*(ctx: UserContext, userId: string) =
   ctx.relationships.del(userId)
-  ctx.handleRelationshipChange(userId, "")
+  ctx.handleRelationshipChange(userId, "", 0)
 
 # ===========================================================================
 # Guild role handling
@@ -920,6 +926,10 @@ proc readyHandler*(ctx: UserContext, evt: DiscordReadyEvent) =
     ctx.handlePrivateChannel(ch.id, ch, updateTsMs, true,
                               portalsInSpace.getOrDefault(key, false))
 
+  # Apply relationship state after private channels exist so portal friend flags are correct.
+  for rel in evt.relationships:
+    ctx.handleRelationshipChange(rel.id, rel.nickname, rel.relType)
+
   ctx.prunePortalList(updateTsMs)
 
   if evt.readStateVersion > ctx.readStateVersion:
@@ -1047,7 +1057,8 @@ proc parseReadyEvent(node: JsonNode): DiscordReadyEvent =
       if relNode.kind == JObject:
         rels.add(DiscordRelationship(
           id: relNode.asString("id"),
-          nickname: relNode.asString("nickname")
+          nickname: relNode.asString("nickname"),
+          relType: relNode.asInt("type")
         ))
   if node.hasKey("read_state") and node["read_state"].kind == JObject:
     let readState = node["read_state"]
@@ -1081,7 +1092,8 @@ proc parseReadyEvent(node: JsonNode): DiscordReadyEvent =
 proc parseRelationship(node: JsonNode): DiscordRelationship =
   DiscordRelationship(
     id: node.asString("id"),
-    nickname: node.asString("nickname")
+    nickname: node.asString("nickname"),
+    relType: node.asInt("type")
   )
 
 proc parseThreadSync(node: JsonNode): DiscordThreadListSync =

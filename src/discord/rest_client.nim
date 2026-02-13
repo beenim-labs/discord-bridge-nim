@@ -66,6 +66,9 @@ proc request*(c: DiscordRestClient, httpMethod: HttpMethod, path: string, payloa
 proc getCurrentUser*(c: DiscordRestClient): DiscordRestResult =
   c.request(HttpGet, "/users/@me")
 
+proc getUser*(c: DiscordRestClient, userId: string): DiscordRestResult =
+  c.request(HttpGet, "/users/" & userId.encodeUrl())
+
 proc getPrivateChannels*(c: DiscordRestClient): DiscordRestResult =
   c.request(HttpGet, "/users/@me/channels")
 
@@ -161,6 +164,9 @@ proc closePrivateChannel*(c: DiscordRestClient, channelId: string): DiscordRestR
 
 proc removeFriend*(c: DiscordRestClient, userId: string): DiscordRestResult =
   c.request(HttpDelete, "/users/@me/relationships/" & userId.encodeUrl())
+
+proc addFriend*(c: DiscordRestClient, userId: string): DiscordRestResult =
+  c.request(HttpPut, "/users/@me/relationships/" & userId.encodeUrl(), %*{"type": 1})
 
 proc blockUser*(c: DiscordRestClient, userId: string): DiscordRestResult =
   c.request(HttpPut, "/users/@me/relationships/" & userId.encodeUrl(), %*{"type": 2})
