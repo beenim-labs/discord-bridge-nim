@@ -655,6 +655,16 @@ proc discordAvatarUrl(userId, avatarHash: string): string =
     return "https://cdn.discordapp.com/avatars/" & userId & "/" & avatarHash & "." & ext & "?size=128"
   "https://cdn.discordapp.com/embed/avatars/0.png"
 
+proc discordGroupIconUrl(channelId, iconHash: string): string =
+  if channelId.len == 0 or iconHash.len == 0:
+    return ""
+  let ext = if iconHash.startsWith("a_"): "gif" else: "png"
+  "https://cdn.discordapp.com/channel-icons/" & channelId & "/" & iconHash & "." & ext & "?size=128"
+
+proc isGenericPrivateChannelName(name: string): bool =
+  let lowered = name.strip().toLowerAscii()
+  lowered == "discord group dm" or lowered == "discord dm" or lowered.len == 0
+
 proc discordDisplayName(userObj: JsonNode): string =
   if userObj.isNil or userObj.kind != JObject:
     return ""
@@ -1123,12 +1133,25 @@ proc bootstrapPrivateChannels(
     rec.portalType = channelType
     let recipient = resolvePrimaryRecipient(channel, user.discordId)
     rec.otherUserId = resolveOtherUserId(channel, user.discordId)
-    let displayName = resolvePrivateChannelNameWithLookup(channel, user.discordId, rest, displayNameCache)
+    var displayName = resolvePrivateChannelNameWithLookup(channel, user.discordId, rest, displayNameCache)
+    if existing.found and isGenericPrivateChannelName(displayName):
+      let existingName =
+        if existing.rec.plainName.len > 0:
+          existing.rec.plainName
+        else:
+          existing.rec.name
+      if not isGenericPrivateChannelName(existingName):
+        displayName = existingName
     rec.plainName = displayName
     rec.name = displayName
     if channelType == 1:
       rec.avatarUrl = recipient.avatarUrl
       rec.avatarSet = false
+    elif channelType == 3:
+      let groupIconUrl = discordGroupIconUrl(channelId, channel{"icon"}.getStr(""))
+      if groupIconUrl.len > 0:
+        rec.avatarUrl = groupIconUrl
+        rec.avatarSet = false
 
     if rec.mxid.len == 0:
       let (bridgeStateKey, bridgeInfo) = api.bridgeInfoForPrivateChannel(channelId, displayName, channelType)
@@ -1143,6 +1166,11 @@ proc bootstrapPrivateChannels(
         initialState.add(%*{
           "type": "m.room.avatar",
           "content": {"url": recipient.avatarUrl}
+        })
+      elif channelType == 3 and rec.avatarUrl.len > 0:
+        initialState.add(%*{
+          "type": "m.room.avatar",
+          "content": {"url": rec.avatarUrl}
         })
       let roomReq = %*{
         "visibility": "private",
@@ -1171,11 +1199,13 @@ proc bootstrapPrivateChannels(
     if channelType == 1:
       api.bootstrapPrivateChannelIdentity(rec.mxid, displayName, recipient)
       messageSynced += api.syncPrivateChannelMessages(user, rec, onlyNew = not logLinkedOnly)
-    elif channelType == 3 and displayName.len > 0:
+    elif channelType == 3:
       # Keep existing group DM rooms renamed to the latest Discord title/participants.
       let prevName = if existing.found: existing.rec.name else: ""
       if not existing.found or prevName != displayName:
         discard api.matrixSetRoomNameAsBot(rec.mxid, displayName)
+      if rec.avatarUrl.len > 0:
+        discard api.matrixSetRoomAvatarAsBot(rec.mxid, rec.avatarUrl)
     if api.runtime.db != nil:
       api.runtime.db.markUserInPortal(UserPortalRecord(
         discordId: channelId,
