@@ -2,6 +2,7 @@ import std/[httpcore, json, os, times, unittest]
 import config/config
 import provisioning/[contracts, server]
 import database/database
+import database/store
 import bridge/runtime
 
 proc newTestApi(): ProvisioningApi =
@@ -77,7 +78,7 @@ suite "provisioning":
     check not res.payload["discord"]["logged_in"].getBool()
     check not res.payload["discord"]["connected"].getBool()
 
-  test "token login parse and conflict behavior":
+  test "token login parse and idempotent behavior":
     let api = newTestApi()
 
     let bad = api.call(HttpPost, "/_matrix/provision/v1/login/token", body = "{")
@@ -89,9 +90,10 @@ suite "provisioning":
     check ok.payload["success"].getBool()
     check ok.payload["id"].getStr() == "123"
 
-    let conflict = api.call(HttpPost, "/_matrix/provision/v1/login/token", body = """{"token":"MTIz.abc.xyz"}""")
-    check conflict.code == Http409
-    check conflict.payload["errcode"].getStr() == ErrCodeAlreadyLoggedIn
+    let repeat = api.call(HttpPost, "/_matrix/provision/v1/login/token", body = """{"token":"MTIz.abc.xyz"}""")
+    check repeat.code == Http200
+    check repeat.payload["success"].getBool()
+    check repeat.payload["id"].getStr() == "123"
 
   test "disconnect reconnect and logout lifecycle":
     let api = newTestApi()
@@ -176,3 +178,25 @@ suite "provisioning":
     let ok = opened.api.call(HttpPost, "/_matrix/provision/v1/login/token", body = """{"token":"MTIz.abc.xyz"}""")
     check ok.code == Http200
     check ok.payload["success"].getBool()
+
+  test "startup resume clears invalid discord token and keeps session disconnected":
+    let opened = openRuntimeApi("provisioning-invalid-token")
+    defer:
+      if fileExists(opened.dbPath):
+        removeFile(opened.dbPath)
+
+    var rec = newUserRecord("@alice:localhost")
+    rec.discordId = "123"
+    rec.discordToken = "bad"
+    opened.api.runtime.db.insertUser(rec)
+
+    opened.api.resumePersistedDiscordSessions()
+
+    let stored = opened.api.runtime.db.getUserByMXID("@alice:localhost")
+    check stored.found
+    check stored.rec.discordToken == ""
+    check stored.rec.discordId == ""
+    let ping = opened.api.call(HttpGet, "/_matrix/provision/v1/ping")
+    check ping.code == Http200
+    check not ping.payload["discord"]["logged_in"].getBool()
+    check not ping.payload["discord"]["connected"].getBool()
