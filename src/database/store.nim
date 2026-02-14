@@ -525,6 +525,22 @@ proc getLastMessage*(db: BridgeDb, key: PortalKey): tuple[found: bool, rec: Mess
     return (false, default(MessageRecord))
   (true, parseMessageRow(rows[0]))
 
+proc getOldestMessage*(db: BridgeDb, key: PortalKey): tuple[found: bool, rec: MessageRecord] =
+  let query = messageSelect & " WHERE dc_chan_id=" & q(key.channelId) & " AND dc_chan_receiver=" & q(key.receiver) &
+              " ORDER BY timestamp ASC, dcid ASC, dc_attachment_id ASC LIMIT 1;"
+  let rows = db.queryRows(query)
+  if rows.len == 0:
+    return (false, default(MessageRecord))
+  (true, parseMessageRow(rows[0]))
+
+proc getRecentMessages*(db: BridgeDb, key: PortalKey, limit: int): seq[MessageRecord] =
+  result = @[]
+  let capped = max(1, min(200, limit))
+  let query = messageSelect & " WHERE dc_chan_id=" & q(key.channelId) & " AND dc_chan_receiver=" & q(key.receiver) &
+              " ORDER BY timestamp DESC, dcid DESC, dc_attachment_id DESC LIMIT " & $capped & ";"
+  for row in db.queryRows(query):
+    result.add(parseMessageRow(row))
+
 proc getLastMessageInThread*(db: BridgeDb, key: PortalKey, threadId: string): tuple[found: bool, rec: MessageRecord] =
   let query = messageSelect & " WHERE dc_chan_id=" & q(key.channelId) & " AND dc_chan_receiver=" & q(key.receiver) &
               " AND dc_thread_id=" & q(threadId) & " ORDER BY timestamp DESC, dc_attachment_id DESC LIMIT 1;"

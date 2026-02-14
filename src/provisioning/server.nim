@@ -32,6 +32,13 @@ type
     discriminator: string,
     err: string
   ] {.closure, gcsafe.}
+  FetchDiscordMessagesFn* = proc(
+    token: string,
+    channelId: string,
+    limit: int,
+    before: string,
+    after: string
+  ): DiscordRestResult {.closure, gcsafe.}
 
   ProvisioningResult* = object
     handled*: bool
@@ -43,6 +50,7 @@ type
     runtime*: DiscordBridgeRuntime
     runQrLogin*: RunQrLoginFn
     verifyDiscordToken*: VerifyDiscordTokenFn
+    fetchDiscordMessages*: FetchDiscordMessagesFn
     lock: Lock
     sessions: Table[string, UserSessionState]
     localUsers: Table[string, UserRecord]
@@ -54,6 +62,13 @@ type
     displayName: string
     avatarUrl: string
 
+  PrivateChannelSyncResult = object
+    syncedCount: int
+    oldestFetchedDiscordId: string
+    hasMore: bool
+    fetchedMessages: seq[JsonNode]
+    err: string
+
 proc sessionStateJson(state: UserSessionState): string
 proc getSessionState(api: ProvisioningApi, mxid: string): UserSessionState
 proc storeSessionState(api: ProvisioningApi, mxid: string, state: UserSessionState)
@@ -62,6 +77,9 @@ proc storeUser(api: ProvisioningApi, rec: UserRecord)
 
 proc nowMs(): int64 =
   getTime().toUnix().int64 * 1000
+
+const DiscordEpochMs = 1420070400000'i64
+const DiscordTimestampContentKey = "fi.bee.discord_ts_ms"
 
 proc isUnauthorizedDiscordError(status: int, err: string): bool =
   if status == 401:
@@ -160,6 +178,10 @@ proc queryParam(query: string, name: string): string =
     if key == name:
       return val
   ""
+
+proc queryParamBool(query: string, name: string): bool =
+  let raw = queryParam(query, name).strip().toLowerAscii()
+  raw in ["1", "true", "yes", "on"]
 
 proc readAuthToken*(headers: HttpHeaders, path: string): string =
   let wsPrefix = SecWebSocketProtocol & "-"
@@ -326,7 +348,7 @@ proc matrixClientRequestAsUser(
     httpMethod: HttpMethod,
     path: string,
     payload: JsonNode = newJNull()
-): tuple[ok: bool, status: int, body: JsonNode, raw: string, err: string] =
+): tuple[ok: bool, status: int, body: JsonNode, raw: string, err: string] {.gcsafe.} =
   let asToken = api.cfg.appservice.asToken.strip()
   if asToken.len == 0:
     return (false, 0, newJNull(), "", "appservice.as_token is empty")
@@ -512,38 +534,48 @@ proc matrixRoomMissingForBot(api: ProvisioningApi, roomId: string): bool =
 proc matrixSendRoomEventAsUser(
     api: ProvisioningApi,
     roomId, senderMxid, eventType, txnId: string,
-    content: JsonNode
-): tuple[ok: bool, eventId: string, err: string]
+    content: JsonNode,
+    timestampMs: int64 = 0
+): tuple[ok: bool, eventId: string, err: string] {.gcsafe.}
 
 proc matrixSendRoomMessageAsUser(
     api: ProvisioningApi,
-    roomId, senderMxid, txnId, body: string
-): tuple[ok: bool, eventId: string, err: string] =
+    roomId, senderMxid, txnId, body: string,
+    timestampMs: int64 = 0
+): tuple[ok: bool, eventId: string, err: string] {.gcsafe.} =
   if roomId.len == 0 or senderMxid.len == 0 or txnId.len == 0 or body.len == 0:
     return (false, "", "invalid matrix message send args")
+  var messageContent = %*{
+    "msgtype": "m.text",
+    "body": body
+  }
+  if timestampMs > 0:
+    messageContent[DiscordTimestampContentKey] = %timestampMs
   api.matrixSendRoomEventAsUser(
     roomId = roomId,
     senderMxid = senderMxid,
     eventType = "m.room.message",
     txnId = txnId,
-    content = %*{
-      "msgtype": "m.text",
-      "body": body
-    }
+    content = messageContent,
+    timestampMs = timestampMs
   )
 
 proc matrixSendRoomEventAsUser(
     api: ProvisioningApi,
     roomId, senderMxid, eventType, txnId: string,
-    content: JsonNode
-): tuple[ok: bool, eventId: string, err: string] =
+    content: JsonNode,
+    timestampMs: int64 = 0
+): tuple[ok: bool, eventId: string, err: string] {.gcsafe.} =
   if roomId.len == 0 or senderMxid.len == 0 or eventType.len == 0 or txnId.len == 0 or content.kind != JObject:
     return (false, "", "invalid matrix event send args")
+  var sendPath = "/_matrix/client/v3/rooms/" & encodeUrl(roomId) &
+    "/send/" & encodeUrl(eventType) & "/" & encodeUrl(txnId)
+  if timestampMs > 0:
+    sendPath &= "?ts=" & encodeUrl($timestampMs)
   let resp = api.matrixClientRequestAsUser(
     actingUser = senderMxid,
     httpMethod = HttpPut,
-    path = "/_matrix/client/v3/rooms/" & encodeUrl(roomId) &
-      "/send/" & encodeUrl(eventType) & "/" & encodeUrl(txnId),
+    path = sendPath,
     payload = content
   )
   if not resp.ok:
@@ -584,7 +616,7 @@ proc discordMessageAttachments(msg: JsonNode): seq[JsonNode] =
     if att.kind == JObject:
       result.add(att)
 
-proc buildMatrixAttachmentContent(att: JsonNode): JsonNode =
+proc buildMatrixAttachmentContent(att: JsonNode, timestampMs: int64 = 0): JsonNode =
   if att.isNil or att.kind != JObject:
     return newJNull()
   let fileName = att{"filename"}.getStr("Attachment")
@@ -600,6 +632,8 @@ proc buildMatrixAttachmentContent(att: JsonNode): JsonNode =
     "body": fileName,
     "url": mediaUrl
   }
+  if timestampMs > 0:
+    payload[DiscordTimestampContentKey] = %timestampMs
   if att.hasKey("size"):
     if not payload.hasKey("info") or payload["info"].kind != JObject:
       payload["info"] = newJObject()
@@ -848,20 +882,42 @@ proc newestDiscordMessageId(messages: openArray[JsonNode]): string =
     if result.len == 0 or compareDiscordSnowflakeIds(mid, result) > 0:
       result = mid
 
-proc syncPrivateChannelMessages(
+proc discordSnowflakeTimestampMs(messageId: string): int64 =
+  if messageId.len == 0:
+    return 0
+  try:
+    let raw = parseBiggestInt(messageId)
+    if raw <= 0:
+      return 0
+    result = (raw.int64 shr 22) + DiscordEpochMs
+  except CatchableError:
+    result = 0
+
+proc syncPrivateChannelMessagesPage(
     api: ProvisioningApi,
     user: UserRecord,
     rec: PortalRecord,
+    limit: int,
+    beforeCursor: string = "",
     onlyNew = false
-): int =
+): PrivateChannelSyncResult {.gcsafe.} =
+  result = PrivateChannelSyncResult(
+    syncedCount: 0,
+    oldestFetchedDiscordId: "",
+    hasMore: false,
+    fetchedMessages: @[],
+    err: ""
+  )
   if api.runtime == nil or api.runtime.db == nil:
-    return 0
+    return
   if user.discordToken.len == 0 or rec.key.channelId.len == 0 or rec.mxid.len == 0:
-    return 0
+    return
 
   let rest = newDiscordRestClient(user.discordToken)
   var collected: seq[JsonNode] = @[]
-  const maxMessages = 300
+  let maxMessages = max(1, limit)
+  var lastFetchCount = 0
+  var lastFetchLimit = 0
 
   let lastMapped = api.runtime.db.getLastMessage(rec.key)
   if onlyNew and lastMapped.found and lastMapped.rec.discordId.len > 0:
@@ -869,33 +925,51 @@ proc syncPrivateChannelMessages(
     while collected.len < maxMessages:
       let remaining = maxMessages - collected.len
       let limit = min(100, remaining)
-      let fetched = rest.getChannelMessages(rec.key.channelId, limit = limit, after = after)
+      let fetched =
+        if api.fetchDiscordMessages != nil:
+          api.fetchDiscordMessages(user.discordToken, rec.key.channelId, limit, "", after)
+        else:
+          rest.getChannelMessages(rec.key.channelId, limit = limit, after = after)
       if not fetched.ok:
-        warn("Failed to fetch Discord messages for channel " & rec.key.channelId & ": " & fetched.err)
+        result.err = "Failed to fetch Discord messages for channel " & rec.key.channelId & ": " & fetched.err
+        if collected.len == 0:
+          return
         break
       if fetched.body.isNil or fetched.body.kind != JArray:
-        warn("Discord messages response is not an array for channel " & rec.key.channelId)
+        result.err = "Discord messages response is not an array for channel " & rec.key.channelId
+        if collected.len == 0:
+          return
         break
       if fetched.body.len == 0:
         break
       for item in fetched.body:
         if item.kind == JObject:
           collected.add(item)
+      lastFetchCount = fetched.body.len
+      lastFetchLimit = limit
       let newest = newestDiscordMessageId(fetched.body.elems)
       if fetched.body.len < limit or newest.len == 0 or newest == after:
         break
       after = newest
   else:
-    var before = ""
+    var before = beforeCursor.strip()
     while collected.len < maxMessages:
       let remaining = maxMessages - collected.len
       let limit = min(100, remaining)
-      let fetched = rest.getChannelMessages(rec.key.channelId, limit = limit, before = before)
+      let fetched =
+        if api.fetchDiscordMessages != nil:
+          api.fetchDiscordMessages(user.discordToken, rec.key.channelId, limit, before, "")
+        else:
+          rest.getChannelMessages(rec.key.channelId, limit = limit, before = before)
       if not fetched.ok:
-        warn("Failed to fetch Discord messages for channel " & rec.key.channelId & ": " & fetched.err)
+        result.err = "Failed to fetch Discord messages for channel " & rec.key.channelId & ": " & fetched.err
+        if collected.len == 0:
+          return
         break
       if fetched.body.isNil or fetched.body.kind != JArray:
-        warn("Discord messages response is not an array for channel " & rec.key.channelId)
+        result.err = "Discord messages response is not an array for channel " & rec.key.channelId
+        if collected.len == 0:
+          return
         break
       if fetched.body.len == 0:
         break
@@ -903,13 +977,23 @@ proc syncPrivateChannelMessages(
       for item in fetched.body:
         if item.kind == JObject:
           collected.add(item)
+      lastFetchCount = fetched.body.len
+      lastFetchLimit = limit
       let oldest = fetched.body[^1]{"id"}.getStr("")
-      if fetched.body.len < limit or oldest.len == 0:
+      if fetched.body.len < limit or oldest.len == 0 or oldest == before:
         break
       before = oldest
+      # Explicit cursor pagination should process exactly one page per request.
+      if beforeCursor.len > 0:
+        break
 
   if collected.len == 0:
-    return 0
+    return
+  result.fetchedMessages = collected
+  if onlyNew:
+    result.hasMore = false
+  else:
+    result.hasMore = lastFetchLimit > 0 and lastFetchCount >= lastFetchLimit
   sortDiscordMessagesAscending(collected)
 
   var synced = 0
@@ -918,6 +1002,8 @@ proc syncPrivateChannelMessages(
     let discordMsgId = msg{"id"}.getStr("")
     if discordMsgId.len == 0:
       continue
+    if result.oldestFetchedDiscordId.len == 0 or compareDiscordSnowflakeIds(discordMsgId, result.oldestFetchedDiscordId) < 0:
+      result.oldestFetchedDiscordId = discordMsgId
     if api.runtime.db.getMessagesByDiscordID(rec.key, discordMsgId).len > 0:
       continue
 
@@ -951,13 +1037,17 @@ proc syncPrivateChannelMessages(
 
     let textBody = msg{"content"}.getStr("").strip()
     let attachments = discordMessageAttachments(msg)
+    let eventTimestampMs =
+      block:
+        let ts = discordSnowflakeTimestampMs(discordMsgId)
+        if ts > 0: ts else: nowMs()
     var firstEventId = ""
     var firstAttachmentId = ""
     var sentAny = false
 
     if textBody.len > 0:
       let txnId = "discord_dm_" & rec.key.channelId & "_" & discordMsgId & "_text"
-      let sentText = api.matrixSendRoomMessageAsUser(rec.mxid, senderMxid, txnId, textBody)
+      let sentText = api.matrixSendRoomMessageAsUser(rec.mxid, senderMxid, txnId, textBody, timestampMs = eventTimestampMs)
       if sentText.ok:
         sentAny = true
         firstEventId = sentText.eventId
@@ -966,7 +1056,7 @@ proc syncPrivateChannelMessages(
 
     var attIdx = 0
     for att in attachments:
-      let content = buildMatrixAttachmentContent(att)
+      let content = buildMatrixAttachmentContent(att, eventTimestampMs)
       if content.kind != JObject:
         continue
       let attachmentId = att{"id"}.getStr($attIdx)
@@ -977,7 +1067,8 @@ proc syncPrivateChannelMessages(
         senderMxid = senderMxid,
         eventType = "m.room.message",
         txnId = txnId,
-        content = content
+        content = content,
+        timestampMs = eventTimestampMs
       )
       if not sentAtt.ok:
         warn("Failed to bridge Discord attachment " & discordMsgId & " into room " & rec.mxid & ": " & sentAtt.err)
@@ -993,7 +1084,7 @@ proc syncPrivateChannelMessages(
       if fallbackBody.len == 0:
         continue
       let txnId = "discord_dm_" & rec.key.channelId & "_" & discordMsgId & "_fallback"
-      let sentFallback = api.matrixSendRoomMessageAsUser(rec.mxid, senderMxid, txnId, fallbackBody)
+      let sentFallback = api.matrixSendRoomMessageAsUser(rec.mxid, senderMxid, txnId, fallbackBody, timestampMs = eventTimestampMs)
       if not sentFallback.ok:
         warn("Failed to bridge Discord message " & discordMsgId & " into room " & rec.mxid & ": " & sentFallback.err)
         continue
@@ -1010,7 +1101,7 @@ proc syncPrivateChannelMessages(
         channelId: rec.key.channelId,
         channelReceiver: rec.key.receiver,
         senderId: senderDiscordId,
-        timestampMs: nowMs(),
+        timestampMs: eventTimestampMs,
         editTimestampNs: 0,
         threadId: "",
         mxid: firstEventId,
@@ -1019,7 +1110,151 @@ proc syncPrivateChannelMessages(
       inc synced
     except CatchableError as e:
       warn("Failed to store Discord message mapping " & discordMsgId & ": " & e.msg)
-  synced
+  result.syncedCount = synced
+
+proc fallbackEventIdForDiscordMessage(
+    api: ProvisioningApi,
+    rec: PortalRecord,
+    discordMsgId: string,
+    fallbackSuffix: string
+): string {.gcsafe.} =
+  let mapped = api.runtime.db.getFirstMessageByDiscordID(rec.key, discordMsgId)
+  if mapped.found and mapped.rec.mxid.len > 0:
+    return mapped.rec.mxid
+  "$discord_fallback_" & discordMsgId & "_" & fallbackSuffix
+
+proc buildSyntheticFallbackEventsFromDiscordMessages(
+    api: ProvisioningApi,
+    rec: PortalRecord,
+    messages: seq[JsonNode],
+    limit: int
+): seq[JsonNode] {.gcsafe.} =
+  result = @[]
+  if messages.len == 0:
+    return
+  let capped = max(1, min(200, limit))
+  for msg in messages:
+    if msg.kind != JObject:
+      continue
+    let discordMsgId = msg{"id"}.getStr("").strip()
+    if discordMsgId.len == 0:
+      continue
+    let authorId = msg{"author"}{"id"}.getStr("").strip()
+    if authorId.len == 0:
+      continue
+    let senderMxid = api.appservicePuppetUserId(authorId)
+    if senderMxid.len == 0:
+      continue
+
+    let tsMs =
+      block:
+        let fromSnowflake = discordSnowflakeTimestampMs(discordMsgId)
+        if fromSnowflake > 0: fromSnowflake else: nowMs()
+
+    var firstEventUsed = false
+    let textBody = msg{"content"}.getStr("").strip()
+    if textBody.len > 0 and result.len < capped:
+      let eventId =
+        if not firstEventUsed:
+          firstEventUsed = true
+          api.fallbackEventIdForDiscordMessage(rec, discordMsgId, "text")
+        else:
+          "$discord_fallback_" & discordMsgId & "_text"
+      result.add(%*{
+        "event_id": eventId,
+        "type": "m.room.message",
+        "room_id": rec.mxid,
+        "sender": senderMxid,
+        "origin_server_ts": tsMs,
+        "content": {
+          "msgtype": "m.text",
+          "body": textBody,
+          DiscordTimestampContentKey: tsMs
+        }
+      })
+
+    var attIdx = 0
+    for att in discordMessageAttachments(msg):
+      if result.len >= capped:
+        break
+      let content = buildMatrixAttachmentContent(att, tsMs)
+      if content.kind != JObject:
+        continue
+      let attKey = att{"id"}.getStr($attIdx)
+      let eventId =
+        if not firstEventUsed:
+          firstEventUsed = true
+          api.fallbackEventIdForDiscordMessage(rec, discordMsgId, "att0")
+        else:
+          "$discord_fallback_" & discordMsgId & "_att_" & $attIdx & "_" & attKey
+      result.add(%*{
+        "event_id": eventId,
+        "type": "m.room.message",
+        "room_id": rec.mxid,
+        "sender": senderMxid,
+        "origin_server_ts": tsMs,
+        "content": content
+      })
+      inc attIdx
+
+    if firstEventUsed:
+      continue
+    let fallbackBody = messageBodyForMatrix(msg)
+    if fallbackBody.len == 0 or result.len >= capped:
+      continue
+    result.add(%*{
+      "event_id": api.fallbackEventIdForDiscordMessage(rec, discordMsgId, "fallback"),
+      "type": "m.room.message",
+      "room_id": rec.mxid,
+      "sender": senderMxid,
+      "origin_server_ts": tsMs,
+      "content": {
+        "msgtype": "m.text",
+        "body": fallbackBody,
+        DiscordTimestampContentKey: tsMs
+      }
+    })
+
+proc fetchLatestDiscordMessagesForFallback(
+    api: ProvisioningApi,
+    user: UserRecord,
+    channelId: string,
+    limit: int
+): seq[JsonNode] {.gcsafe.} =
+  result = @[]
+  if user.discordToken.len == 0 or channelId.len == 0:
+    return
+  let capped = max(1, min(100, limit))
+  let fetched =
+    if api.fetchDiscordMessages != nil:
+      api.fetchDiscordMessages(user.discordToken, channelId, capped, "", "")
+    else:
+      let rest = newDiscordRestClient(user.discordToken)
+      rest.getChannelMessages(channelId, limit = capped)
+  if not fetched.ok or fetched.body.isNil or fetched.body.kind != JArray:
+    return
+  for item in fetched.body:
+    if item.kind == JObject:
+      result.add(item)
+  if result.len > 1:
+    sortDiscordMessagesAscending(result)
+
+proc syncPrivateChannelMessages(
+    api: ProvisioningApi,
+    user: UserRecord,
+    rec: PortalRecord,
+    onlyNew = false
+): int =
+  let page = api.syncPrivateChannelMessagesPage(
+    user = user,
+    rec = rec,
+    limit = 300,
+    beforeCursor = "",
+    onlyNew = onlyNew
+  )
+  if page.err.len > 0:
+    warn(page.err)
+  page.syncedCount
 
 proc bridgeInfoForPrivateChannel(
     api: ProvisioningApi,
@@ -1198,14 +1433,15 @@ proc bootstrapPrivateChannels(
       api.runtime.db.insertPortal(rec)
     if channelType == 1:
       api.bootstrapPrivateChannelIdentity(rec.mxid, displayName, recipient)
-      messageSynced += api.syncPrivateChannelMessages(user, rec, onlyNew = not logLinkedOnly)
-    elif channelType == 3:
+    if channelType == 3:
       # Keep existing group DM rooms renamed to the latest Discord title/participants.
       let prevName = if existing.found: existing.rec.name else: ""
       if not existing.found or prevName != displayName:
         discard api.matrixSetRoomNameAsBot(rec.mxid, displayName)
       if rec.avatarUrl.len > 0:
         discard api.matrixSetRoomAvatarAsBot(rec.mxid, rec.avatarUrl)
+    if channelType in [1, 3]:
+      messageSynced += api.syncPrivateChannelMessages(user, rec, onlyNew = not logLinkedOnly)
     if api.runtime.db != nil:
       api.runtime.db.markUserInPortal(UserPortalRecord(
         discordId: channelId,
@@ -1512,6 +1748,9 @@ proc handleDiscordChatAction(api: ProvisioningApi, user: UserRecord, body: strin
 
   if not restResult.ok:
     let detail = if restResult.err.len > 0: restResult.err else: "Discord API request failed"
+    if isUnauthorizedDiscordError(restResult.status, detail):
+      api.clearDiscordSessionForInvalidToken(user.mxid, detail)
+      return provisioningResult(Http409, errorResponse("You're not connected to discord", ErrCodeNotConnected))
     return provisioningResult(Http502, errorResponse(detail, ErrCodeConnectFailed))
 
   if action == "close-dm":
@@ -1526,6 +1765,160 @@ proc handleDiscordChatAction(api: ProvisioningApi, user: UserRecord, body: strin
     of "remove-message": "Removed Discord message"
     else: "Discord action completed"
   provisioningResult(Http200, successResponse(statusText))
+
+proc parseBackfillLimit(payload: JsonNode, fallback = 25): int =
+  result = fallback
+  if payload.isNil or payload.kind != JObject or not payload.hasKey("limit"):
+    return
+  case payload["limit"].kind
+  of JInt:
+    result = payload["limit"].getInt(fallback)
+  of JString:
+    try:
+      result = parseInt(payload["limit"].getStr($fallback))
+    except CatchableError:
+      discard
+  else:
+    discard
+  result = max(1, min(100, result))
+
+proc loadMappedMatrixEventsForPortal(
+    api: ProvisioningApi,
+    user: UserRecord,
+    rec: PortalRecord,
+    limit: int
+): seq[JsonNode] {.gcsafe.} =
+  result = @[]
+  if api.runtime == nil or api.runtime.db == nil:
+    return
+  if rec.mxid.len == 0:
+    return
+
+  let mapped = api.runtime.db.getRecentMessages(rec.key, limit)
+  if mapped.len == 0:
+    return
+
+  var seenEventIds = initHashSet[string]()
+  for msg in mapped:
+    let eventId = msg.mxid.strip()
+    if eventId.len == 0:
+      continue
+    if eventId in seenEventIds:
+      continue
+    seenEventIds.incl(eventId)
+
+    let eventPath = "/_matrix/client/v3/rooms/" & encodeUrl(rec.mxid) &
+      "/event/" & encodeUrl(eventId)
+    var acting = user.mxid
+    if acting.len == 0:
+      acting = api.appserviceBotUserId()
+    let resp = api.matrixClientRequestAsUser(
+      actingUser = acting,
+      httpMethod = HttpGet,
+      path = eventPath
+    )
+    if not resp.ok:
+      # Fallback to bot user if requesting as the bridge user fails.
+      let botResp = api.matrixClientRequestAsUser(
+        actingUser = api.appserviceBotUserId(),
+        httpMethod = HttpGet,
+        path = eventPath
+      )
+      if botResp.ok and botResp.body.kind == JObject:
+        result.add(botResp.body)
+      continue
+    if resp.body.kind == JObject:
+      result.add(resp.body)
+    if result.len >= limit:
+      break
+
+proc handleDiscordHistoryBackfill(api: ProvisioningApi, user: UserRecord, body: string): ProvisioningResult =
+  if user.discordToken.len == 0:
+    return provisioningResult(Http409, errorResponse("You're not connected to discord", ErrCodeNotConnected))
+  if api.runtime == nil or api.runtime.db == nil:
+    return provisioningResult(Http500, errorResponse("Bridge runtime is unavailable", ErrCodeConnectFailed))
+
+  var payload: JsonNode = newJObject()
+  try:
+    payload = parseJson(body)
+  except CatchableError:
+    return provisioningResult(Http400, errorResponse("Failed to parse request body", ErrCodeBadJson))
+
+  if payload.isNil or payload.kind != JObject:
+    return provisioningResult(Http400, errorResponse("Failed to parse request body", ErrCodeBadJson))
+
+  let roomId = payload{"room_id"}.getStr("").strip()
+  if roomId.len == 0:
+    return provisioningResult(Http400, errorResponse("room_id is required", ErrCodeBadJson))
+  let limit = parseBackfillLimit(payload, 25)
+
+  let portal = api.runtime.db.getPortalByMXID(roomId)
+  if not portal.found:
+    return provisioningResult(Http404, errorResponse("Portal not found for room", ErrCodeNotFound))
+  let rec = portal.rec
+  if rec.key.channelId.len == 0:
+    return provisioningResult(Http404, errorResponse("Portal missing Discord channel ID", ErrCodeNotFound))
+  if not api.runtime.db.isUserInPortal(user.mxid, rec.key.channelId):
+    return provisioningResult(Http404, errorResponse("Portal is not linked for this user", ErrCodeNotFound))
+  if rec.portalType notin [1, 3]:
+    return provisioningResult(Http400, errorResponse("History backfill is only available for Discord DMs", ErrCodeBadJson))
+
+  let requestedCursor = payload{"cursor"}.getStr("").strip()
+  let oldestEventId = payload{"oldest_event_id"}.getStr("").strip()
+  var cursor = requestedCursor
+  let cursorProvided = requestedCursor.len > 0
+  let oldestEventProvided = oldestEventId.len > 0
+  if cursor.len == 0 and oldestEventId.len > 0:
+    let mapped = api.runtime.db.getMessageByMXID(rec.key, oldestEventId)
+    if mapped.found and mapped.rec.discordId.len > 0:
+      cursor = mapped.rec.discordId
+  if cursor.len == 0:
+    let oldestMapped = api.runtime.db.getOldestMessage(rec.key)
+    if oldestMapped.found and oldestMapped.rec.discordId.len > 0:
+      cursor = oldestMapped.rec.discordId
+
+  let page = api.syncPrivateChannelMessagesPage(
+    user = user,
+    rec = rec,
+    limit = limit,
+    beforeCursor = cursor,
+    onlyNew = false
+  )
+  if page.err.len > 0:
+    if isUnauthorizedDiscordError(0, page.err):
+      api.clearDiscordSessionForInvalidToken(user.mxid, page.err)
+      return provisioningResult(Http409, errorResponse("You're not connected to discord", ErrCodeNotConnected))
+    return provisioningResult(Http502, errorResponse(page.err, ErrCodeConnectFailed))
+
+  var fallbackEvents = newJArray()
+  # If no new events were sent to Matrix (common when mappings already exist),
+  # return fallback events for the exact fetched Discord page first. This keeps
+  # cursor pagination range-correct and avoids replaying recent duplicates.
+  if page.syncedCount == 0:
+    if page.fetchedMessages.len > 0:
+      for eventData in api.buildSyntheticFallbackEventsFromDiscordMessages(rec, page.fetchedMessages, limit):
+        fallbackEvents.add(eventData)
+    # Initial bootstrap only: if there was no explicit cursor context and the
+    # fetched page is empty, try loading recent mapped Matrix events.
+    if fallbackEvents.len == 0 and not cursorProvided and not oldestEventProvided:
+      for eventData in api.loadMappedMatrixEventsForPortal(user, rec, limit):
+        fallbackEvents.add(eventData)
+    # Initial "latest-load" can request history before the oldest mapped event.
+    # If that returns empty and Matrix event fetch is unavailable, fetch latest
+    # Discord messages directly as a last-resort source for client cache restore.
+    if fallbackEvents.len == 0 and not cursorProvided and not oldestEventProvided:
+      let latestMessages = api.fetchLatestDiscordMessagesForFallback(user, rec.key.channelId, limit)
+      for eventData in api.buildSyntheticFallbackEventsFromDiscordMessages(rec, latestMessages, limit):
+        fallbackEvents.add(eventData)
+
+  return provisioningResult(Http200, %*{
+    "success": true,
+    "inserted_count": page.syncedCount,
+    "next_cursor": page.oldestFetchedDiscordId,
+    "has_more": page.hasMore,
+    "endpoint_available": true,
+    "events": fallbackEvents
+  })
 
 proc subPath(api: ProvisioningApi, fullPath: string): tuple[handled: bool, sub: string] =
   let prefix = api.cfg.bridge.provisioning.prefix.strip()
@@ -1561,6 +1954,21 @@ proc handleRequest*(
   var session = api.getSessionState(user.mxid)
 
   if reqMethod == HttpGet and sub == "/v1/ping":
+    let verifyToken = queryParamBool(query, "verify_token")
+    if verifyToken and user.discordToken.len > 0:
+      let verified = api.verifyDiscordToken(user.discordToken)
+      if not verified.ok:
+        if isUnauthorizedDiscordError(0, verified.err):
+          api.clearDiscordSessionForInvalidToken(
+            user.mxid,
+            if verified.err.len > 0: verified.err else: "invalid token"
+          )
+          user = api.getOrCreateUser(uid)
+          session = api.getSessionState(user.mxid)
+      else:
+        api.markSessionConnected(user, session, verified.discordId, verified.username, verified.discriminator)
+        user = api.getOrCreateUser(uid)
+        session = api.getSessionState(user.mxid)
     if api.runtimeManagersReady() and user.discordToken.len > 0:
       # Keep /ping lightweight: background poller handles room/bootstrap sync.
       api.startPrivateChannelPolling(user.mxid)
@@ -1687,6 +2095,9 @@ proc handleRequest*(
   if reqMethod == HttpPost and sub == "/v1/discord/chat_action":
     return api.handleDiscordChatAction(user, body)
 
+  if reqMethod == HttpPost and sub == "/v1/discord/history_backfill":
+    return api.handleDiscordHistoryBackfill(user, body)
+
   if reqMethod == HttpGet and sub == "/v1/guilds":
     return provisioningResult(Http200, %*{"guilds": []})
 
@@ -1774,6 +2185,7 @@ proc newProvisioningApi*(cfg: Config, runtime: DiscordBridgeRuntime = nil): Prov
   result.runQrLogin = proc(timeoutMs: int, onQrCode: proc(url: string) {.closure, gcsafe.}): Future[RemoteAuthLoginResult] {.async, gcsafe.} =
     await runRemoteAuthLogin(timeoutMs, onQrCode)
   result.verifyDiscordToken = verifyDiscordTokenWithRest
+  result.fetchDiscordMessages = nil
   initLock(result.lock)
 
 proc handle*(api: ProvisioningApi, req: Request): Future[bool] {.async.} =

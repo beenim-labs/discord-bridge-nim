@@ -2,8 +2,23 @@ import std/[httpcore, json, os, times, unittest]
 import config/config
 import provisioning/[contracts, server]
 import database/database
+import database/entities
 import database/store
 import bridge/runtime
+import discord/rest_client
+
+var fetchBeforeBuf {.global.}: array[256, char]
+var fetchBeforeLen {.global.}: int
+
+proc setFetchBefore(value: string) {.gcsafe.} =
+  fetchBeforeLen = min(value.len, fetchBeforeBuf.len)
+  for i in 0 ..< fetchBeforeLen:
+    fetchBeforeBuf[i] = value[i]
+
+proc getFetchBefore(): string =
+  result = newString(fetchBeforeLen)
+  for i in 0 ..< fetchBeforeLen:
+    result[i] = fetchBeforeBuf[i]
 
 proc newTestApi(): ProvisioningApi =
   var cfg = defaultConfig()
@@ -60,6 +75,32 @@ proc openRuntimeApi(name: string): tuple[api: ProvisioningApi, dbPath: string] =
       (false, "", "", "", "invalid token")
     else:
       (true, "123", "alice", "0001", "")
+
+proc seedBackfillPortal(
+    api: ProvisioningApi,
+    mxid: string,
+    roomId: string,
+    channelId: string,
+    portalType: int = 1,
+    markMembership = true
+) =
+  var rec = newUserRecord(mxid)
+  rec.discordId = "123"
+  rec.discordToken = "token"
+  api.runtime.db.insertUser(rec)
+
+  var portal = newPortalRecord(PortalKey(channelId: channelId, receiver: ""), portalType)
+  portal.mxid = roomId
+  api.runtime.db.insertPortal(portal)
+
+  if markMembership:
+    api.runtime.db.markUserInPortal(UserPortalRecord(
+      discordId: channelId,
+      userMxid: mxid,
+      portalType: "dm",
+      inSpace: false,
+      timestampMs: getTime().toUnix.int64 * 1000
+    ))
 
 suite "provisioning":
   test "auth required":
@@ -200,3 +241,153 @@ suite "provisioning":
     check ping.code == Http200
     check not ping.payload["discord"]["logged_in"].getBool()
     check not ping.payload["discord"]["connected"].getBool()
+
+  test "history_backfill requires room_id":
+    let opened = openRuntimeApi("provisioning-history-required-room")
+    defer:
+      if fileExists(opened.dbPath):
+        removeFile(opened.dbPath)
+    var user = newUserRecord("@alice:localhost")
+    user.discordId = "123"
+    user.discordToken = "token"
+    opened.api.runtime.db.insertUser(user)
+    let res = opened.api.call(HttpPost, "/_matrix/provision/v1/discord/history_backfill", body = """{"limit":25}""")
+    check res.code == Http400
+    check res.payload["errcode"].getStr() == ErrCodeBadJson
+
+  test "history_backfill rejects non-dm portals":
+    let opened = openRuntimeApi("provisioning-history-non-dm")
+    defer:
+      if fileExists(opened.dbPath):
+        removeFile(opened.dbPath)
+    seedBackfillPortal(opened.api, "@alice:localhost", "!room:localhost", "ch-non-dm", portalType = 0)
+    let res = opened.api.call(
+      HttpPost,
+      "/_matrix/provision/v1/discord/history_backfill",
+      body = """{"room_id":"!room:localhost","limit":25}"""
+    )
+    check res.code == Http400
+    check res.payload["errcode"].getStr() == ErrCodeBadJson
+
+  test "history_backfill uses explicit cursor and returns success contract":
+    let opened = openRuntimeApi("provisioning-history-cursor")
+    defer:
+      if fileExists(opened.dbPath):
+        removeFile(opened.dbPath)
+    seedBackfillPortal(opened.api, "@alice:localhost", "!dm:localhost", "ch-cursor", portalType = 1)
+    setFetchBefore("")
+    opened.api.fetchDiscordMessages = proc(
+      token: string,
+      channelId: string,
+      limit: int,
+      before: string,
+      after: string
+    ): DiscordRestResult {.closure, gcsafe.} =
+      setFetchBefore(before)
+      return (true, 200, %*[], "")
+    let res = opened.api.call(
+      HttpPost,
+      "/_matrix/provision/v1/discord/history_backfill",
+      body = """{"room_id":"!dm:localhost","limit":25,"cursor":"555"}"""
+    )
+    check res.code == Http200
+    check getFetchBefore() == "555"
+    check res.payload["success"].getBool()
+    check res.payload["inserted_count"].getInt(999) == 0
+    check res.payload["next_cursor"].getStr("x") == ""
+    check not res.payload["has_more"].getBool(true)
+    check res.payload["endpoint_available"].getBool(false)
+
+  test "history_backfill falls back to oldest_event_id mapping":
+    let opened = openRuntimeApi("provisioning-history-oldest-event")
+    defer:
+      if fileExists(opened.dbPath):
+        removeFile(opened.dbPath)
+    seedBackfillPortal(opened.api, "@alice:localhost", "!dm-old:localhost", "ch-old", portalType = 1)
+    opened.api.runtime.db.insertMessage(MessageRecord(
+      discordId: "777",
+      attachmentId: "",
+      channelId: "ch-old",
+      channelReceiver: "",
+      senderId: "u1",
+      timestampMs: getTime().toUnix.int64 * 1000,
+      editTimestampNs: 0,
+      threadId: "",
+      mxid: "$old_evt",
+      senderMxid: "@discord_u1:localhost"
+    ))
+    setFetchBefore("")
+    opened.api.fetchDiscordMessages = proc(
+      token: string,
+      channelId: string,
+      limit: int,
+      before: string,
+      after: string
+    ): DiscordRestResult {.closure, gcsafe.} =
+      setFetchBefore(before)
+      return (true, 200, %*[], "")
+    let res = opened.api.call(
+      HttpPost,
+      "/_matrix/provision/v1/discord/history_backfill",
+      body = """{"room_id":"!dm-old:localhost","limit":25,"oldest_event_id":"$old_evt"}"""
+    )
+    check res.code == Http200
+    check getFetchBefore() == "777"
+
+  test "history_backfill returns synthetic events when mapped fetch is unavailable":
+    let opened = openRuntimeApi("provisioning-history-synthetic-fallback")
+    defer:
+      if fileExists(opened.dbPath):
+        removeFile(opened.dbPath)
+    seedBackfillPortal(opened.api, "@alice:localhost", "!dm-synth:localhost", "ch-synth", portalType = 1)
+    opened.api.runtime.db.insertMessage(MessageRecord(
+      discordId: "500",
+      attachmentId: "",
+      channelId: "ch-synth",
+      channelReceiver: "",
+      senderId: "u1",
+      timestampMs: getTime().toUnix.int64 * 1000,
+      editTimestampNs: 0,
+      threadId: "",
+      mxid: "$mapped500",
+      senderMxid: "@discord_u1:localhost"
+    ))
+    var fetchCalls = 0
+    opened.api.fetchDiscordMessages = proc(
+      token: string,
+      channelId: string,
+      limit: int,
+      before: string,
+      after: string
+    ): DiscordRestResult {.closure, gcsafe.} =
+      inc fetchCalls
+      if fetchCalls == 1:
+        # Initial auto-cursor request (before oldest mapped) yields no results.
+        return (true, 200, %*[], "")
+      # Latest fallback request returns one Discord message.
+      return (true, 200, %*[
+        {
+          "id": "600",
+          "content": "hello from discord fallback",
+          "author": {
+            "id": "42",
+            "username": "fallback-user"
+          },
+          "attachments": []
+        }
+      ], "")
+    let res = opened.api.call(
+      HttpPost,
+      "/_matrix/provision/v1/discord/history_backfill",
+      body = """{"room_id":"!dm-synth:localhost","limit":25}"""
+    )
+    check res.code == Http200
+    check fetchCalls == 2
+    check res.payload["inserted_count"].getInt(-1) == 0
+    check res.payload.hasKey("events")
+    check res.payload["events"].kind == JArray
+    check res.payload["events"].len > 0
+    let first = res.payload["events"][0]
+    check first{"room_id"}.getStr("") == "!dm-synth:localhost"
+    check first{"type"}.getStr("") == "m.room.message"
+    check first{"content"}{"body"}.getStr("") == "hello from discord fallback"
