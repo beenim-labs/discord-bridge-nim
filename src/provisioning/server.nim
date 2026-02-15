@@ -1,6 +1,6 @@
 ## Provisioning API shell compatible with Go route surface.
 
-import std/[algorithm, asyncdispatch, asynchttpserver, base64, httpclient, json, locks, random, sets, strutils, tables, times, uri]
+import std/[algorithm, asyncdispatch, asynchttpserver, base64, httpclient, json, locks, os, random, sets, strutils, tables, times, uri]
 import config/config
 import bridge/runtime
 import database/[entities, store]
@@ -23,6 +23,7 @@ type
     delayMs: int
     lastWarn: string
     lastWarnAtMs: int64
+    lastRelationshipSyncMs: int64
 
   RunQrLoginFn* = proc(timeoutMs: int, onQrCode: proc(url: string) {.closure, gcsafe.}): Future[RemoteAuthLoginResult] {.closure, gcsafe.}
   VerifyDiscordTokenFn* = proc(token: string): tuple[
@@ -67,6 +68,20 @@ type
     oldestFetchedDiscordId: string
     hasMore: bool
     fetchedMessages: seq[JsonNode]
+    err: string
+
+  DiscordRelationshipInfo = object
+    relType: int
+    nickname: string
+
+  RelationshipVerifyMode = enum
+    rvmHardSuccess
+    rvmSoftSuccess
+    rvmFailed
+
+  RelationshipVerifyResult = object
+    mode: RelationshipVerifyMode
+    actualType: int
     err: string
 
 proc sessionStateJson(state: UserSessionState): string
@@ -835,6 +850,262 @@ proc resolvePrivateChannelNameWithLookup(
 proc resolveOtherUserId(channel: JsonNode, selfDiscordId: string): string =
   resolvePrimaryRecipient(channel, selfDiscordId).id
 
+proc relationshipTypeLabel(relType: int): string =
+  case relType
+  of 1:
+    "friend"
+  of 2:
+    "blocked"
+  of 0:
+    "none"
+  else:
+    "type-" & $relType
+
+proc relationshipVerifyModeLabel(mode: RelationshipVerifyMode): string =
+  case mode
+  of rvmHardSuccess:
+    "hard_success"
+  of rvmSoftSuccess:
+    "soft_success"
+  of rvmFailed:
+    "failed"
+
+proc parseDiscordRelationshipMap(payload: JsonNode): Table[string, DiscordRelationshipInfo] =
+  result = initTable[string, DiscordRelationshipInfo]()
+  if payload.isNil or payload.kind != JArray:
+    return
+  for node in payload:
+    if node.kind != JObject:
+      continue
+    let userId = node{"id"}.getStr("").strip()
+    if userId.len == 0:
+      continue
+    result[userId] = DiscordRelationshipInfo(
+      relType: node{"type"}.getInt(0),
+      nickname: node{"nickname"}.getStr("").strip()
+    )
+
+proc fetchDiscordRelationshipMap(
+    api: ProvisioningApi,
+    user: UserRecord,
+    rest: DiscordRestClient,
+    source: string
+): tuple[ok: bool, status: int, relationships: Table[string, DiscordRelationshipInfo], err: string] =
+  var empty = initTable[string, DiscordRelationshipInfo]()
+  if user.discordToken.len == 0:
+    return (false, 0, empty, "You're not connected to discord")
+  let fetched = rest.getRelationships()
+  if not fetched.ok:
+    let detail =
+      if fetched.err.len > 0:
+        fetched.err
+      else:
+        "Discord relationships request failed"
+    if isUnauthorizedDiscordError(fetched.status, detail):
+      api.clearDiscordSessionForInvalidToken(user.mxid, detail)
+    warn("[provisioning] relationship-sync source=" & source &
+      " mxid=" & user.mxid & " status=" & $fetched.status &
+      " err=" & detail)
+    return (false, fetched.status, empty, detail)
+  if fetched.body.isNil or fetched.body.kind != JArray:
+    let err = "Discord relationships response is not an array"
+    warn("[provisioning] relationship-sync source=" & source &
+      " mxid=" & user.mxid & " err=" & err)
+    return (false, fetched.status, empty, err)
+  (true, fetched.status, parseDiscordRelationshipMap(fetched.body), "")
+
+proc applyDiscordRelationshipMapToDmPortals(
+    api: ProvisioningApi,
+    relationships: Table[string, DiscordRelationshipInfo],
+    source: string
+) =
+  if not api.runtimeManagersReady():
+    return
+  var updated = 0
+  var friendCount = 0
+  var blockedCount = 0
+  var otherCount = 0
+  var preservedBlockedCount = 0
+  let portals = api.runtime.db.getAllPortals()
+  for existing in portals:
+    if existing.portalType != 1 or existing.otherUserId.len == 0:
+      continue
+    let hasRelationship = relationships.hasKey(existing.otherUserId)
+    var relType = 0
+    var nickname = ""
+    if hasRelationship:
+      let rel = relationships[existing.otherUserId]
+      relType = rel.relType
+      nickname = rel.nickname
+    case relType
+    of 1:
+      inc friendCount
+    of 2:
+      inc blockedCount
+    else:
+      inc otherCount
+
+    var rec = existing
+    var changed = false
+    let shouldBeFriend = hasRelationship and relType == 1
+    if hasRelationship:
+      let shouldBeBlocked = relType == 2
+      if rec.friendNick != shouldBeFriend:
+        rec.friendNick = shouldBeFriend
+        changed = true
+      if rec.blocked != shouldBeBlocked:
+        rec.blocked = shouldBeBlocked
+        changed = true
+    else:
+      # Relationship feed can omit blocked users for some auth modes.
+      # Don't clear blocked state when relationship is absent.
+      if rec.friendNick:
+        rec.friendNick = false
+        changed = true
+      if rec.blocked:
+        inc preservedBlockedCount
+    if shouldBeFriend and nickname.len > 0 and rec.name != nickname:
+      rec.name = nickname
+      rec.nameSet = true
+      changed = true
+    if changed:
+      api.runtime.db.updatePortal(rec)
+      inc updated
+
+  info("[provisioning] relationship-sync source=" & source &
+    " portals_updated=" & $updated &
+    " friends=" & $friendCount &
+    " blocked=" & $blockedCount &
+    " other=" & $otherCount &
+    " blocked_preserved_absent=" & $preservedBlockedCount)
+
+proc applyRelationshipActionIntentToDmPortals(
+    api: ProvisioningApi,
+    targetUserId: string,
+    action: string,
+    explicitFriend = false
+) =
+  if not api.runtimeManagersReady() or targetUserId.len == 0:
+    return
+  let portals = api.runtime.db.findPrivateChatsWith(targetUserId, dmType = 1)
+  if portals.len == 0:
+    return
+  var updated = 0
+  for existing in portals:
+    var rec = existing
+    var changed = false
+    case action
+    of "block":
+      if rec.friendNick:
+        rec.friendNick = false
+        changed = true
+      if not rec.blocked:
+        rec.blocked = true
+        changed = true
+    of "unblock":
+      if rec.friendNick:
+        rec.friendNick = false
+        changed = true
+      if rec.blocked:
+        rec.blocked = false
+        changed = true
+    of "remove-friend":
+      if rec.friendNick:
+        rec.friendNick = false
+        changed = true
+      if rec.blocked:
+        rec.blocked = false
+        changed = true
+    of "add-friend":
+      if explicitFriend:
+        if not rec.friendNick:
+          rec.friendNick = true
+          changed = true
+        if rec.blocked:
+          rec.blocked = false
+          changed = true
+    else:
+      discard
+    if changed:
+      api.runtime.db.updatePortal(rec)
+      inc updated
+  if updated > 0:
+    info("[provisioning] relationship-action-local-apply action=" & action &
+      " target_user_id=" & targetUserId &
+      " portals_updated=" & $updated &
+      " explicit_friend=" & $(if explicitFriend: 1 else: 0))
+
+proc verifyRelationshipActionState(
+    action: string,
+    targetUserId: string,
+    relationships: Table[string, DiscordRelationshipInfo]
+): tuple[ok: bool, actualType: int, err: string] =
+  let actualType =
+    if targetUserId.len > 0 and relationships.hasKey(targetUserId):
+      relationships[targetUserId].relType
+    else:
+      0
+  case action
+  of "block":
+    if actualType == 2:
+      return (true, actualType, "")
+    (false, actualType, "expected blocked relationship")
+  of "add-friend":
+    if actualType == 1:
+      return (true, actualType, "")
+    (false, actualType, "expected friend relationship")
+  of "unblock", "remove-friend":
+    if actualType notin [1, 2]:
+      return (true, actualType, "")
+    (false, actualType, "expected no direct friend/block relationship")
+  else:
+    (true, actualType, "")
+
+proc resolveRelationshipVerificationResult(
+    action: string,
+    hardVerify: tuple[ok: bool, actualType: int, err: string],
+    preActionType: int,
+    preActionTypeKnown: bool
+): RelationshipVerifyResult =
+  if hardVerify.ok:
+    return RelationshipVerifyResult(mode: rvmHardSuccess, actualType: hardVerify.actualType, err: "")
+
+  case action
+  of "block":
+    # Only accept friend->none as soft success.
+    # If pre-state is unknown/none and post-state is none, treat as failure to
+    # avoid local-only block success without remote evidence.
+    if hardVerify.actualType == 0 and preActionTypeKnown and preActionType == 1:
+      return RelationshipVerifyResult(
+        mode: rvmSoftSuccess,
+        actualType: hardVerify.actualType,
+        err: "friend-to-none fallback accepted"
+      )
+  of "add-friend":
+    # Friend requests may not materialize immediately as type=1 in /relationships.
+    # Treat this as request-sent when the action itself succeeded.
+    if hardVerify.actualType != 2:
+      return RelationshipVerifyResult(
+        mode: rvmSoftSuccess,
+        actualType: hardVerify.actualType,
+        err: "friend state opaque after request"
+      )
+  else:
+    discard
+
+  RelationshipVerifyResult(mode: rvmFailed, actualType: hardVerify.actualType, err: hardVerify.err)
+
+proc relationshipExpectedLabel(action: string): string =
+  case action
+  of "block":
+    "blocked"
+  of "add-friend":
+    "friend"
+  of "unblock", "remove-friend":
+    "none"
+  else:
+    "unknown"
+
 proc compareDiscordSnowflakeIds(id1, id2: string): int =
   if id1 == id2:
     return 0
@@ -1339,6 +1610,11 @@ proc bootstrapPrivateChannels(
   var linked = 0
   var messageSynced = 0
   let rest = newDiscordRestClient(user.discordToken)
+  let relationshipFetch = api.fetchDiscordRelationshipMap(user, rest, "bootstrap")
+  let relationshipSyncAvailable = relationshipFetch.ok
+  if not relationshipSyncAvailable and isUnauthorizedDiscordError(relationshipFetch.status, relationshipFetch.err):
+    return
+  let relationships = relationshipFetch.relationships
   for channel in channels:
     if channel.kind != JObject:
       continue
@@ -1369,6 +1645,12 @@ proc bootstrapPrivateChannels(
     let recipient = resolvePrimaryRecipient(channel, user.discordId)
     rec.otherUserId = resolveOtherUserId(channel, user.discordId)
     var displayName = resolvePrivateChannelNameWithLookup(channel, user.discordId, rest, displayNameCache)
+    if channelType == 1 and relationshipSyncAvailable and rec.otherUserId.len > 0 and relationships.hasKey(rec.otherUserId):
+      let rel = relationships[rec.otherUserId]
+      rec.friendNick = rel.relType == 1
+      rec.blocked = rel.relType == 2
+      if rec.friendNick and rel.nickname.len > 0:
+        displayName = rel.nickname
     if existing.found and isGenericPrivateChannelName(displayName):
       let existingName =
         if existing.rec.plainName.len > 0:
@@ -1451,6 +1733,9 @@ proc bootstrapPrivateChannels(
         timestampMs: nowMs()
       ))
 
+  if relationshipSyncAvailable:
+    api.applyDiscordRelationshipMapToDmPortals(relationships, "bootstrap")
+
   let shouldLog =
     if logLinkedOnly:
       created > 0 or linked > 0 or messageSynced > 0
@@ -1467,6 +1752,7 @@ proc bootstrapPrivateChannels(
 
 proc startPrivateChannelPolling(api: ProvisioningApi, mxid: string)
 proc runPrivateChannelPolling(api: ProvisioningApi, mxid: string): Future[void] {.async.}
+proc kickImmediatePrivateChannelSync(api: ProvisioningApi, mxid: string)
 
 proc startPrivateChannelPolling(api: ProvisioningApi, mxid: string) =
   if not api.runtimeManagersReady() or mxid.len == 0:
@@ -1479,6 +1765,52 @@ proc startPrivateChannelPolling(api: ProvisioningApi, mxid: string) =
   if shouldStart:
     api.setPollingState(mxid, PollingState(delayMs: 5000))
     asyncCheck api.runPrivateChannelPolling(mxid)
+
+proc kickImmediatePrivateChannelSync(api: ProvisioningApi, mxid: string) =
+  if not api.runtimeManagersReady() or mxid.len == 0:
+    return
+
+  var state = api.getPollingState(mxid)
+  state.lastSnapshot = ""
+  state.stableCycles = 0
+  state.delayMs = 5000
+  api.setPollingState(mxid, state)
+  api.startPrivateChannelPolling(mxid)
+  info("[provisioning] login-token immediate-sync queued user_id=" & mxid)
+
+  asyncCheck (proc() {.async.} =
+    if not api.runtimeManagersReady():
+      return
+    let current = api.runtime.db.getUserByMXID(mxid)
+    if not current.found or current.rec.discordToken.len == 0:
+      return
+
+    let rest = newDiscordRestClient(current.rec.discordToken)
+    let fetched = rest.getPrivateChannels()
+    if not fetched.ok:
+      if isUnauthorizedDiscordError(fetched.status, fetched.err):
+        api.clearDiscordSessionForInvalidToken(mxid, if fetched.err.len > 0: fetched.err else: "unauthorized")
+      else:
+        api.warnPolling(mxid, "[provisioning] immediate private channel sync failed for " & mxid & ": " & fetched.err)
+      return
+    if fetched.body.isNil or fetched.body.kind != JArray:
+      api.warnPolling(mxid, "[provisioning] immediate private channel sync returned non-array payload for " & mxid)
+      return
+
+    try:
+      api.bootstrapPrivateChannels(current.rec, logLinkedOnly = false, prefetchedChannels = fetched.body)
+      var refreshed = api.getPollingState(mxid)
+      refreshed.lastSnapshot = privateChannelSnapshot(fetched.body)
+      refreshed.stableCycles = 0
+      refreshed.delayMs = 5000
+      refreshed.lastRelationshipSyncMs = nowMs()
+      api.setPollingState(mxid, refreshed)
+    except CatchableError as e:
+      if isUnauthorizedDiscordError(0, e.msg):
+        api.clearDiscordSessionForInvalidToken(mxid, e.msg)
+      else:
+        api.warnPolling(mxid, "[provisioning] immediate private channel sync failed for " & mxid & ": " & e.msg)
+  )()
 
 proc runPrivateChannelPolling(api: ProvisioningApi, mxid: string): Future[void] {.async.} =
   randomize()
@@ -1534,8 +1866,22 @@ proc runPrivateChannelPolling(api: ProvisioningApi, mxid: string): Future[void] 
       if not unchanged:
         api.bootstrapPrivateChannels(current.rec, logLinkedOnly = false, prefetchedChannels = fetched.body)
         state.stableCycles = 0
+        state.lastRelationshipSyncMs = nowMs()
       else:
         inc state.stableCycles
+      let nowTs = nowMs()
+      let shouldSyncRelationships =
+        unchanged and (
+          state.lastRelationshipSyncMs <= 0 or
+          (nowTs - state.lastRelationshipSyncMs) >= 30000
+        )
+      if shouldSyncRelationships:
+        let relationshipFetch = api.fetchDiscordRelationshipMap(current.rec, rest, "poll")
+        if relationshipFetch.ok:
+          api.applyDiscordRelationshipMapToDmPortals(relationshipFetch.relationships, "poll")
+          state.lastRelationshipSyncMs = nowTs
+        elif isUnauthorizedDiscordError(relationshipFetch.status, relationshipFetch.err):
+          break
       state.lastSnapshot = snapshot
       state.delayMs = nextPollingDelayMs(state.stableCycles)
       api.setPollingState(mxid, state)
@@ -1696,7 +2042,7 @@ proc handleDiscordChatAction(api: ProvisioningApi, user: UserRecord, body: strin
   if not portal.found:
     return provisioningResult(Http404, errorResponse("Portal not found for room", ErrCodeNotFound))
 
-  let rec = portal.rec
+  var rec = portal.rec
   if rec.key.channelId.len == 0:
     return provisioningResult(Http404, errorResponse("Portal missing Discord channel ID", ErrCodeNotFound))
   if not api.runtime.db.isUserInPortal(user.mxid, rec.key.channelId):
@@ -1705,35 +2051,81 @@ proc handleDiscordChatAction(api: ProvisioningApi, user: UserRecord, body: strin
     return provisioningResult(Http400, errorResponse("Chat action is only available for Discord DMs", ErrCodeBadJson))
 
   let rest = newDiscordRestClient(user.discordToken)
+  var relationshipTargetUserId = rec.otherUserId
+  if action in ["block", "unblock", "add-friend", "remove-friend"]:
+    if rec.portalType != 1:
+      let verb =
+        case action
+        of "block":
+          "Block"
+        of "unblock":
+          "Unblock"
+        of "add-friend":
+          "Add friend"
+        of "remove-friend":
+          "Remove friend"
+        else:
+          "Action"
+      return provisioningResult(Http400, errorResponse(verb & " is only available in 1:1 DMs", ErrCodeBadJson))
+    # Always resolve the current DM counterpart from Discord channel metadata.
+    # This avoids stale other_user_id values and ensures relationship actions
+    # target the real current user behind the DM.
+    let channelLookup = rest.getChannel(rec.key.channelId)
+    if not channelLookup.ok:
+      let detail =
+        if channelLookup.err.len > 0:
+          channelLookup.err
+        else:
+          "Discord channel lookup failed"
+      if isUnauthorizedDiscordError(channelLookup.status, detail):
+        api.clearDiscordSessionForInvalidToken(user.mxid, detail)
+        return provisioningResult(Http409, errorResponse("You're not connected to discord", ErrCodeNotConnected))
+      return provisioningResult(Http502, errorResponse(detail, ErrCodeConnectFailed))
+    let resolvedTargetUserId = resolveOtherUserId(channelLookup.body, user.discordId)
+    if resolvedTargetUserId.len > 0:
+      relationshipTargetUserId = resolvedTargetUserId
+      if rec.otherUserId != resolvedTargetUserId:
+        rec.otherUserId = resolvedTargetUserId
+        api.runtime.db.updatePortal(rec)
+    if relationshipTargetUserId.len == 0:
+      return provisioningResult(Http400, errorResponse("Cannot " & action & ": DM user is unknown", ErrCodeBadJson))
+
+  var preActionRelationshipType = 0
+  var preActionRelationshipTypeKnown = false
+  if action in ["block", "unblock", "add-friend", "remove-friend"]:
+    let preActionFetch = api.fetchDiscordRelationshipMap(user, rest, "chat-action-pre")
+    if preActionFetch.ok:
+      preActionRelationshipTypeKnown = true
+      if relationshipTargetUserId.len > 0 and preActionFetch.relationships.hasKey(relationshipTargetUserId):
+        preActionRelationshipType = preActionFetch.relationships[relationshipTargetUserId].relType
+      else:
+        preActionRelationshipType = 0
+      info("[provisioning] relationship-pre action=" & action &
+        " target_user_id=" & relationshipTargetUserId &
+        " pre_type=" & relationshipTypeLabel(preActionRelationshipType) &
+        " status=" & $preActionFetch.status)
+    elif isUnauthorizedDiscordError(preActionFetch.status, preActionFetch.err):
+      return provisioningResult(Http409, errorResponse("You're not connected to discord", ErrCodeNotConnected))
+
   var restResult: DiscordRestResult = (ok: false, status: 0, body: newJNull(), err: "")
   case action
   of "close-dm":
     restResult = rest.closePrivateChannel(rec.key.channelId)
   of "block":
-    if rec.portalType != 1:
-      return provisioningResult(Http400, errorResponse("Block is only available in 1:1 DMs", ErrCodeBadJson))
-    if rec.otherUserId.len == 0:
-      return provisioningResult(Http400, errorResponse("Cannot block: DM user is unknown", ErrCodeBadJson))
-    restResult = rest.blockUser(rec.otherUserId)
+    # Normalize existing relationship state before block.
+    # Some states (e.g. pending or stale friend edges) can interfere with block transitions.
+    let clearRelationship = rest.removeFriend(relationshipTargetUserId)
+    if not clearRelationship.ok and isUnauthorizedDiscordError(clearRelationship.status, clearRelationship.err):
+      api.clearDiscordSessionForInvalidToken(user.mxid, clearRelationship.err)
+      return provisioningResult(Http409, errorResponse("You're not connected to discord", ErrCodeNotConnected))
+    restResult = rest.blockUser(relationshipTargetUserId)
   of "unblock":
-    if rec.portalType != 1:
-      return provisioningResult(Http400, errorResponse("Unblock is only available in 1:1 DMs", ErrCodeBadJson))
-    if rec.otherUserId.len == 0:
-      return provisioningResult(Http400, errorResponse("Cannot unblock: DM user is unknown", ErrCodeBadJson))
     # Discord unblocks by deleting the relationship entry.
-    restResult = rest.removeFriend(rec.otherUserId)
+    restResult = rest.removeFriend(relationshipTargetUserId)
   of "add-friend":
-    if rec.portalType != 1:
-      return provisioningResult(Http400, errorResponse("Add friend is only available in 1:1 DMs", ErrCodeBadJson))
-    if rec.otherUserId.len == 0:
-      return provisioningResult(Http400, errorResponse("Cannot add friend: DM user is unknown", ErrCodeBadJson))
-    restResult = rest.addFriend(rec.otherUserId)
+    restResult = rest.addFriend(relationshipTargetUserId)
   of "remove-friend":
-    if rec.portalType != 1:
-      return provisioningResult(Http400, errorResponse("Remove friend is only available in 1:1 DMs", ErrCodeBadJson))
-    if rec.otherUserId.len == 0:
-      return provisioningResult(Http400, errorResponse("Cannot remove friend: DM user is unknown", ErrCodeBadJson))
-    restResult = rest.removeFriend(rec.otherUserId)
+    restResult = rest.removeFriend(relationshipTargetUserId)
   of "remove-message":
     if eventId.len == 0:
       return provisioningResult(Http400, errorResponse("event_id is required for remove-message", ErrCodeBadJson))
@@ -1759,45 +2151,185 @@ proc handleDiscordChatAction(api: ProvisioningApi, user: UserRecord, body: strin
       api.clearDiscordSessionForInvalidToken(user.mxid, detail)
       return provisioningResult(Http409, errorResponse("You're not connected to discord", ErrCodeNotConnected))
     return provisioningResult(Http502, errorResponse(detail, ErrCodeConnectFailed))
+  elif action in ["block", "unblock", "add-friend", "remove-friend"]:
+    info("[provisioning] relationship-action request ok action=" & action &
+      " target_user_id=" & relationshipTargetUserId &
+      " status=" & $restResult.status)
 
+  var relationshipVerifyMode = rvmHardSuccess
   if action == "close-dm":
     api.runtime.db.markUserNotInPortal(user.mxid, rec.key.channelId)
   elif action in ["block", "unblock", "add-friend", "remove-friend"]:
-    proc applyRelationshipAction(target: var PortalRecord) =
-      case action
-      of "block":
-        target.blocked = true
-        target.friendNick = false
-      of "unblock":
-        target.blocked = false
-      of "add-friend":
-        target.friendNick = true
-        target.blocked = false
-      of "remove-friend":
-        target.friendNick = false
+    let expected = relationshipExpectedLabel(action)
+    var relationshipFetch = api.fetchDiscordRelationshipMap(user, rest, "chat-action-verify")
+    var verify = verifyRelationshipActionState(action, relationshipTargetUserId, relationshipFetch.relationships)
+    var hadSuccessfulRelationshipFetch = relationshipFetch.ok
+    var sawFriendDuringVerification =
+      (preActionRelationshipTypeKnown and preActionRelationshipType == 1) or
+      verify.actualType == 1
+    var lastRelationshipFetchErr =
+      if relationshipFetch.ok:
+        ""
       else:
-        discard
+        if relationshipFetch.err.len > 0: relationshipFetch.err else: "Discord relationship verification failed"
 
-    var updated = rec
-    applyRelationshipAction(updated)
-    api.runtime.db.updatePortal(updated)
+    info("[provisioning] relationship-verify action=" & action &
+      " target_user_id=" & relationshipTargetUserId &
+      " expected=" & expected &
+      " actual=" & relationshipTypeLabel(verify.actualType) &
+      " status=" & $relationshipFetch.status &
+      " attempt=0")
 
-    # Keep duplicate receiver-scoped DM portal rows consistent for the same user.
-    if rec.portalType == 1 and rec.otherUserId.len > 0:
-      let relatedPortals = api.runtime.db.findPrivateChatsWith(rec.otherUserId, dmType = 1)
-      for related in relatedPortals:
-        if related.key == rec.key:
-          continue
-        var relatedUpdated = related
-        applyRelationshipAction(relatedUpdated)
-        api.runtime.db.updatePortal(relatedUpdated)
+    for attempt in 1 .. 4:
+      if verify.ok:
+        break
+      if relationshipFetch.ok and verify.actualType notin [1, 2]:
+        # For unblock/remove-friend we can stop once target is neither friend nor blocked.
+        if action in ["unblock", "remove-friend"]:
+          break
+      sleep(min(1000, 150 * attempt))
+      relationshipFetch = api.fetchDiscordRelationshipMap(
+        user,
+        rest,
+        "chat-action-verify-retry-" & $attempt
+      )
+      if relationshipFetch.ok:
+        hadSuccessfulRelationshipFetch = true
+        verify = verifyRelationshipActionState(action, relationshipTargetUserId, relationshipFetch.relationships)
+        if verify.actualType == 1:
+          sawFriendDuringVerification = true
+      else:
+        if relationshipFetch.err.len > 0:
+          lastRelationshipFetchErr = relationshipFetch.err
+      info("[provisioning] relationship-verify action=" & action &
+        " target_user_id=" & relationshipTargetUserId &
+        " expected=" & expected &
+        " actual=" & relationshipTypeLabel(verify.actualType) &
+        " status=" & $relationshipFetch.status &
+        " attempt=" & $attempt)
+
+    if not verify.ok and action == "block" and verify.actualType == 1:
+      info("[provisioning] relationship-verify remediation action=block target_user_id=" &
+        relationshipTargetUserId & " step=remove-friend-then-block")
+      let unfriend = rest.removeFriend(relationshipTargetUserId)
+      if not unfriend.ok and isUnauthorizedDiscordError(unfriend.status, unfriend.err):
+        api.clearDiscordSessionForInvalidToken(user.mxid, unfriend.err)
+        return provisioningResult(Http409, errorResponse("You're not connected to discord", ErrCodeNotConnected))
+      let secondBlock = rest.blockUser(relationshipTargetUserId)
+      if not secondBlock.ok:
+        let blockErr = if secondBlock.err.len > 0: secondBlock.err else: "Discord block request failed"
+        if isUnauthorizedDiscordError(secondBlock.status, blockErr):
+          api.clearDiscordSessionForInvalidToken(user.mxid, blockErr)
+          return provisioningResult(Http409, errorResponse("You're not connected to discord", ErrCodeNotConnected))
+        return provisioningResult(Http502, errorResponse(blockErr, ErrCodeConnectFailed))
+      info("[provisioning] relationship-action remediation request ok action=block target_user_id=" &
+        relationshipTargetUserId & " status=" & $secondBlock.status)
+
+      # Re-verify after remediation with short bounded retries.
+      for attempt in 0 .. 4:
+        if attempt > 0:
+          sleep(min(1000, 180 * attempt))
+        relationshipFetch = api.fetchDiscordRelationshipMap(
+          user,
+          rest,
+          "chat-action-remediate-verify-" & $attempt
+        )
+        if relationshipFetch.ok:
+          hadSuccessfulRelationshipFetch = true
+          verify = verifyRelationshipActionState(action, relationshipTargetUserId, relationshipFetch.relationships)
+          if verify.actualType == 1:
+            sawFriendDuringVerification = true
+        else:
+          if relationshipFetch.err.len > 0:
+            lastRelationshipFetchErr = relationshipFetch.err
+        info("[provisioning] relationship-verify action=" & action &
+          " target_user_id=" & relationshipTargetUserId &
+          " expected=" & expected &
+          " actual=" & relationshipTypeLabel(verify.actualType) &
+          " status=" & $relationshipFetch.status &
+          " remediate_attempt=" & $attempt)
+        if verify.ok:
+          break
+
+    if not preActionRelationshipTypeKnown and sawFriendDuringVerification:
+      preActionRelationshipTypeKnown = true
+      preActionRelationshipType = 1
+
+    var verifyOutcome = resolveRelationshipVerificationResult(
+      action,
+      verify,
+      preActionRelationshipType,
+      preActionRelationshipTypeKnown
+    )
+
+    if not hadSuccessfulRelationshipFetch:
+      if isUnauthorizedDiscordError(relationshipFetch.status, lastRelationshipFetchErr):
+        return provisioningResult(Http409, errorResponse("You're not connected to discord", ErrCodeNotConnected))
+      if action == "add-friend":
+        verifyOutcome = RelationshipVerifyResult(
+          mode: rvmSoftSuccess,
+          actualType: 0,
+          err: "relationship fetch unavailable; accepted as request-sent"
+        )
+      else:
+        let detail =
+          if lastRelationshipFetchErr.len > 0:
+            lastRelationshipFetchErr
+          else:
+            "Discord relationship verification failed"
+        return provisioningResult(Http502, errorResponse(detail, ErrCodeConnectFailed))
+
+    info("[provisioning] relationship-verify result action=" & action &
+      " target_user_id=" & relationshipTargetUserId &
+      " expected=" & expected &
+      " actual=" & relationshipTypeLabel(verifyOutcome.actualType) &
+      " mode=" & relationshipVerifyModeLabel(verifyOutcome.mode) &
+      " pre_type=" & (
+        if preActionRelationshipTypeKnown:
+          relationshipTypeLabel(preActionRelationshipType)
+        else:
+          "unknown"
+      ) &
+      (if verifyOutcome.err.len > 0: " reason=" & verifyOutcome.err else: ""))
+
+    if verifyOutcome.mode == rvmFailed:
+      let actual = relationshipTypeLabel(verifyOutcome.actualType)
+      warn("[provisioning] relationship-verify failed action=" & action &
+        " target_user_id=" & relationshipTargetUserId &
+        " expected=" & expected &
+        " actual=" & actual)
+      return provisioningResult(
+        Http502,
+        errorResponse(
+          "Discord relationship verification failed: expected " & expected & ", got " & actual,
+          ErrCodeConnectFailed
+        )
+      )
+
+    if action == "block" and verifyOutcome.mode == rvmSoftSuccess:
+      info("[provisioning] relationship-verify fallback success action=block target_user_id=" &
+        relationshipTargetUserId & " path=friend-to-none")
+
+    let explicitFriend = action == "add-friend" and verifyOutcome.mode == rvmHardSuccess
+    api.applyRelationshipActionIntentToDmPortals(
+      relationshipTargetUserId,
+      action,
+      explicitFriend = explicitFriend
+    )
+    if relationshipFetch.ok:
+      api.applyDiscordRelationshipMapToDmPortals(relationshipFetch.relationships, "chat-action-verify")
+    relationshipVerifyMode = verifyOutcome.mode
 
   let statusText =
     case action
     of "close-dm": "Closed Discord DM"
     of "block": "Blocked Discord user"
     of "unblock": "Unblocked Discord user"
-    of "add-friend": "Added Discord friend"
+    of "add-friend":
+      if relationshipVerifyMode == rvmSoftSuccess:
+        "Discord friend request sent"
+      else:
+        "Added Discord friend"
     of "remove-friend": "Removed Discord friend"
     of "remove-message": "Removed Discord message"
     else: "Discord action completed"
@@ -2083,8 +2615,8 @@ proc handleRequest*(
         var existingSession = api.getSessionState(user.mxid)
         api.markSessionConnected(user, existingSession, existing.discordId, existing.username, existing.discriminator)
         if api.runtimeManagersReady():
-          # Keep token login idempotent and fast; poller performs sync.
-          api.startPrivateChannelPolling(user.mxid)
+          # Keep token login idempotent and fast while kicking an immediate DM sync.
+          api.kickImmediatePrivateChannelSync(user.mxid)
         return provisioningResult(Http200, loginResponse(user.discordId, existingSession.username, existingSession.discriminator))
       user.discordToken = ""
       user.discordId = ""
@@ -2123,7 +2655,7 @@ proc handleRequest*(
     info("[provisioning] /v1/login/token stored user/session for " & user.mxid)
     if api.runtimeManagersReady():
       info("[provisioning] /v1/login/token scheduling polling sync for " & user.mxid)
-      api.startPrivateChannelPolling(user.mxid)
+      api.kickImmediatePrivateChannelSync(user.mxid)
       info("[provisioning] /v1/login/token polling started for " & user.mxid)
     # Startup coordinator already runs on bridge startup; avoid re-entry here.
     info("[provisioning] /v1/login/token success for " & user.mxid)

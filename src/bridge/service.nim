@@ -52,6 +52,47 @@ proc parseCommandBody(event: MatrixEvent): string =
     return ""
   event.content{"body"}.getStr("").strip()
 
+proc parseReplyTargetEventId(event: MatrixEvent): string =
+  if event.content.kind != JObject:
+    return ""
+  let relatesTo = event.content{"m.relates_to"}
+  if relatesTo.kind != JObject:
+    return ""
+  let inReplyTo = relatesTo{"m.in_reply_to"}
+  if inReplyTo.kind != JObject:
+    return ""
+  inReplyTo{"event_id"}.getStr("").strip()
+
+proc parseDiscordFallbackMessageId(eventId: string): tuple[ok: bool, discordId: string] =
+  const Prefix = "$discord_fallback_"
+  let trimmed = eventId.strip()
+  if not trimmed.startsWith(Prefix):
+    return (false, "")
+  let remainder = trimmed[Prefix.len .. ^1]
+  let sepIdx = remainder.find('_')
+  if sepIdx <= 0:
+    return (false, "")
+  let candidate = remainder[0 ..< sepIdx]
+  if candidate.len == 0 or not candidate.allCharsInSet({'0'..'9'}):
+    return (false, "")
+  (true, candidate)
+
+proc resolveDiscordReplyMessageId(
+    svc: DiscordBridgeService,
+    key: PortalKey,
+    replyEventId: string
+): tuple[discordMessageId: string, mode: string] =
+  let trimmed = replyEventId.strip()
+  if trimmed.len == 0:
+    return ("", "none")
+  let mapped = svc.db.getMessageByMXID(key, trimmed)
+  if mapped.found and mapped.rec.discordId.len > 0:
+    return (mapped.rec.discordId, "db")
+  let fallback = parseDiscordFallbackMessageId(trimmed)
+  if fallback.ok:
+    return (fallback.discordId, "fallback-id")
+  ("", "unresolved")
+
 proc handleLoginTokenCommand(svc: DiscordBridgeService, event: MatrixEvent): bool =
   let body = event.parseCommandBody()
   if body.len == 0:
@@ -81,6 +122,7 @@ proc relayRoomMessageToDiscord(svc: DiscordBridgeService, event: MatrixEvent) =
   if event.roomId.len == 0:
     return
   var message = event.parseCommandBody()
+  let replyEventId = parseReplyTargetEventId(event)
   var mediaUrl = ""
   if event.content.kind == JObject:
     mediaUrl = event.content{"url"}.getStr("").strip()
@@ -97,10 +139,22 @@ proc relayRoomMessageToDiscord(svc: DiscordBridgeService, event: MatrixEvent) =
     return
 
   let rest = newDiscordRestClient(sender.rec.discordToken)
+  let replyResolution = svc.resolveDiscordReplyMessageId(portal.rec.key, replyEventId)
+  if replyEventId.len > 0:
+    let hasReference = if replyResolution.discordMessageId.len > 0: "1" else: "0"
+    if replyResolution.mode == "unresolved":
+      warn(fmt"[REPLY-BRIDGE] unresolved room={event.roomId} target_event={replyEventId} mapping={replyResolution.mode} has_reference=0")
+    else:
+      info(fmt"[REPLY-BRIDGE] resolved room={event.roomId} target_event={replyEventId} mapping={replyResolution.mode} has_reference={hasReference}")
   if mediaUrl.startsWith("file://"):
     let encodedPath = mediaUrl["file://".len .. ^1]
     let localPath = decodeUrl(encodedPath).strip()
-    let sent = rest.createMessageWithFile(portal.rec.key.channelId, message, localPath)
+    let sent = rest.createMessageWithFile(
+      portal.rec.key.channelId,
+      message,
+      localPath,
+      replyResolution.discordMessageId
+    )
     if not sent.ok:
       inc svc.failedEvents
       warn(fmt"Failed to relay Matrix file to Discord channel {portal.rec.key.channelId}: status={sent.status} err={sent.err}")
@@ -115,7 +169,14 @@ proc relayRoomMessageToDiscord(svc: DiscordBridgeService, event: MatrixEvent) =
   if message.len == 0:
     return
 
-  let sent = rest.createMessage(portal.rec.key.channelId, %*{"content": message})
+  var payload = %*{"content": message}
+  if replyResolution.discordMessageId.len > 0:
+    payload["message_reference"] = %*{
+      "message_id": replyResolution.discordMessageId,
+      "channel_id": portal.rec.key.channelId,
+      "fail_if_not_exists": false
+    }
+  let sent = rest.createMessage(portal.rec.key.channelId, payload)
   if not sent.ok:
     inc svc.failedEvents
     warn(fmt"Failed to relay Matrix message to Discord channel {portal.rec.key.channelId}: status={sent.status} err={sent.err}")
