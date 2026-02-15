@@ -88,6 +88,9 @@ proc relayRoomMessageToDiscord(svc: DiscordBridgeService, event: MatrixEvent) =
   let portal = svc.db.getPortalByMXID(event.roomId)
   if not portal.found or portal.rec.key.channelId.len == 0:
     return
+  if portal.rec.portalType == 1 and portal.rec.blocked:
+    warn(fmt"Blocked Discord DM relay suppressed: room={event.roomId} channel={portal.rec.key.channelId}")
+    return
 
   let sender = svc.runtime.users.getByMXID(event.sender, createIfMissing = false)
   if not sender.found or sender.rec.discordToken.len == 0:
