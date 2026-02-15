@@ -5,7 +5,7 @@ import database/[database, entities, store_utils]
 
 const
   userSelect = "SELECT mxid, dcid, discord_token, management_room, space_room, dm_space_room, read_state_version, COALESCE(heartbeat_session,'') FROM \"user\""
-  portalSelect = "SELECT dcid, receiver, type, other_user_id, dc_guild_id, dc_parent_id, mxid, plain_name, name, name_set, friend_nick, topic, topic_set, avatar, avatar_url, avatar_set, encrypted, in_space, first_event_id, relay_webhook_id, relay_webhook_secret FROM portal"
+  portalSelect = "SELECT dcid, receiver, type, other_user_id, dc_guild_id, dc_parent_id, mxid, plain_name, name, name_set, friend_nick, blocked, topic, topic_set, avatar, avatar_url, avatar_set, encrypted, in_space, first_event_id, relay_webhook_id, relay_webhook_secret FROM portal"
   guildSelect = "SELECT dcid, mxid, plain_name, name, name_set, avatar, avatar_url, avatar_set, bridging_mode FROM guild"
   puppetSelect = "SELECT id, name, name_set, avatar, avatar_url, avatar_set, contact_info_set, global_name, username, discriminator, is_bot, is_webhook, is_application, custom_mxid, access_token, next_batch FROM puppet"
   threadSelect = "SELECT dcid, parent_chan_id, root_msg_dcid, root_msg_mxid, creation_notice_mxid FROM thread"
@@ -48,16 +48,17 @@ proc parsePortalRow(row: seq[string]): PortalRecord =
     name: row.getCol(8),
     nameSet: parseBool(row.getCol(9)),
     friendNick: parseBool(row.getCol(10)),
-    topic: row.getCol(11),
-    topicSet: parseBool(row.getCol(12)),
-    avatar: row.getCol(13),
-    avatarUrl: row.getCol(14),
-    avatarSet: parseBool(row.getCol(15)),
-    encrypted: parseBool(row.getCol(16)),
-    inSpace: row.getCol(17),
-    firstEventId: row.getCol(18),
-    relayWebhookId: row.getCol(19),
-    relayWebhookSecret: row.getCol(20)
+    blocked: parseBool(row.getCol(11)),
+    topic: row.getCol(12),
+    topicSet: parseBool(row.getCol(13)),
+    avatar: row.getCol(14),
+    avatarUrl: row.getCol(15),
+    avatarSet: parseBool(row.getCol(16)),
+    encrypted: parseBool(row.getCol(17)),
+    inSpace: row.getCol(18),
+    firstEventId: row.getCol(19),
+    relayWebhookId: row.getCol(20),
+    relayWebhookSecret: row.getCol(21)
   )
 
 proc parseGuildRow(row: seq[string]): GuildRecord =
@@ -237,6 +238,7 @@ proc newPortalRecord*(key: PortalKey, portalType: int): PortalRecord =
     name: "",
     nameSet: false,
     friendNick: false,
+    blocked: false,
     topic: "",
     topicSet: false,
     avatar: "",
@@ -291,11 +293,11 @@ proc findPrivateChatsOf*(db: BridgeDb, receiver: string, dmType = 1): seq[Portal
     result.add(parsePortalRow(row))
 
 proc insertPortal*(db: BridgeDb, rec: PortalRecord) =
-  let stmt = "INSERT INTO portal (dcid, receiver, type, other_user_id, dc_guild_id, dc_parent_id, mxid, plain_name, name, name_set, friend_nick, topic, topic_set, avatar, avatar_url, avatar_set, encrypted, in_space, first_event_id, relay_webhook_id, relay_webhook_secret) VALUES (" &
+  let stmt = "INSERT INTO portal (dcid, receiver, type, other_user_id, dc_guild_id, dc_parent_id, mxid, plain_name, name, name_set, friend_nick, blocked, topic, topic_set, avatar, avatar_url, avatar_set, encrypted, in_space, first_event_id, relay_webhook_id, relay_webhook_secret) VALUES (" &
              q(rec.key.channelId) & ", " & q(rec.key.receiver) & ", " & $rec.portalType & ", " & toSqlNullable(rec.otherUserId) &
              ", " & toSqlNullable(rec.guildId) & ", " & toSqlNullable(rec.parentId) & ", " & toSqlNullable(rec.mxid) &
              ", " & q(rec.plainName) & ", " & q(rec.name) & ", " & b2i(rec.nameSet) & ", " & b2i(rec.friendNick) &
-             ", " & q(rec.topic) & ", " & b2i(rec.topicSet) & ", " & q(rec.avatar) & ", " & q(rec.avatarUrl) &
+             ", " & b2i(rec.blocked) & ", " & q(rec.topic) & ", " & b2i(rec.topicSet) & ", " & q(rec.avatar) & ", " & q(rec.avatarUrl) &
              ", " & b2i(rec.avatarSet) & ", " & b2i(rec.encrypted) & ", " & q(rec.inSpace) & ", " & q(rec.firstEventId) &
              ", " & toSqlNullable(rec.relayWebhookId) & ", " & toSqlNullable(rec.relayWebhookSecret) & ");"
   db.execSql(stmt)
@@ -304,7 +306,8 @@ proc updatePortal*(db: BridgeDb, rec: PortalRecord) =
   let stmt = "UPDATE portal SET type=" & $rec.portalType & ", other_user_id=" & toSqlNullable(rec.otherUserId) &
              ", dc_guild_id=" & toSqlNullable(rec.guildId) & ", dc_parent_id=" & toSqlNullable(rec.parentId) &
              ", mxid=" & toSqlNullable(rec.mxid) & ", plain_name=" & q(rec.plainName) & ", name=" & q(rec.name) &
-             ", name_set=" & b2i(rec.nameSet) & ", friend_nick=" & b2i(rec.friendNick) & ", topic=" & q(rec.topic) &
+             ", name_set=" & b2i(rec.nameSet) & ", friend_nick=" & b2i(rec.friendNick) & ", blocked=" & b2i(rec.blocked) &
+             ", topic=" & q(rec.topic) &
              ", topic_set=" & b2i(rec.topicSet) & ", avatar=" & q(rec.avatar) & ", avatar_url=" & q(rec.avatarUrl) &
              ", avatar_set=" & b2i(rec.avatarSet) & ", encrypted=" & b2i(rec.encrypted) & ", in_space=" & q(rec.inSpace) &
              ", first_event_id=" & q(rec.firstEventId) & ", relay_webhook_id=" & toSqlNullable(rec.relayWebhookId) &

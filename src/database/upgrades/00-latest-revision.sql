@@ -30,6 +30,7 @@ CREATE TABLE portal (
     name       TEXT NOT NULL,
     name_set   BOOLEAN NOT NULL,
     friend_nick BOOLEAN NOT NULL,
+    blocked    BOOLEAN NOT NULL DEFAULT false,
     topic      TEXT NOT NULL,
     topic_set  BOOLEAN NOT NULL,
     avatar     TEXT NOT NULL,

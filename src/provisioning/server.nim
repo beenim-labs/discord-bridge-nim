@@ -1689,7 +1689,7 @@ proc handleDiscordChatAction(api: ProvisioningApi, user: UserRecord, body: strin
   let eventId = payload{"event_id"}.getStr("").strip()
   if roomId.len == 0 or action.len == 0:
     return provisioningResult(Http400, errorResponse("room_id and action are required", ErrCodeBadJson))
-  if action notin ["close-dm", "block", "add-friend", "remove-friend", "remove-message"]:
+  if action notin ["close-dm", "block", "unblock", "add-friend", "remove-friend", "remove-message"]:
     return provisioningResult(Http400, errorResponse("unsupported action", ErrCodeBadJson))
 
   let portal = api.runtime.db.getPortalByMXID(roomId)
@@ -1715,6 +1715,13 @@ proc handleDiscordChatAction(api: ProvisioningApi, user: UserRecord, body: strin
     if rec.otherUserId.len == 0:
       return provisioningResult(Http400, errorResponse("Cannot block: DM user is unknown", ErrCodeBadJson))
     restResult = rest.blockUser(rec.otherUserId)
+  of "unblock":
+    if rec.portalType != 1:
+      return provisioningResult(Http400, errorResponse("Unblock is only available in 1:1 DMs", ErrCodeBadJson))
+    if rec.otherUserId.len == 0:
+      return provisioningResult(Http400, errorResponse("Cannot unblock: DM user is unknown", ErrCodeBadJson))
+    # Discord unblocks by deleting the relationship entry.
+    restResult = rest.removeFriend(rec.otherUserId)
   of "add-friend":
     if rec.portalType != 1:
       return provisioningResult(Http400, errorResponse("Add friend is only available in 1:1 DMs", ErrCodeBadJson))
@@ -1755,11 +1762,41 @@ proc handleDiscordChatAction(api: ProvisioningApi, user: UserRecord, body: strin
 
   if action == "close-dm":
     api.runtime.db.markUserNotInPortal(user.mxid, rec.key.channelId)
+  elif action in ["block", "unblock", "add-friend", "remove-friend"]:
+    proc applyRelationshipAction(target: var PortalRecord) =
+      case action
+      of "block":
+        target.blocked = true
+        target.friendNick = false
+      of "unblock":
+        target.blocked = false
+      of "add-friend":
+        target.friendNick = true
+        target.blocked = false
+      of "remove-friend":
+        target.friendNick = false
+      else:
+        discard
+
+    var updated = rec
+    applyRelationshipAction(updated)
+    api.runtime.db.updatePortal(updated)
+
+    # Keep duplicate receiver-scoped DM portal rows consistent for the same user.
+    if rec.portalType == 1 and rec.otherUserId.len > 0:
+      let relatedPortals = api.runtime.db.findPrivateChatsWith(rec.otherUserId, dmType = 1)
+      for related in relatedPortals:
+        if related.key == rec.key:
+          continue
+        var relatedUpdated = related
+        applyRelationshipAction(relatedUpdated)
+        api.runtime.db.updatePortal(relatedUpdated)
 
   let statusText =
     case action
     of "close-dm": "Closed Discord DM"
     of "block": "Blocked Discord user"
+    of "unblock": "Unblocked Discord user"
     of "add-friend": "Added Discord friend"
     of "remove-friend": "Removed Discord friend"
     of "remove-message": "Removed Discord message"

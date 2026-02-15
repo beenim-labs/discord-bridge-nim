@@ -521,22 +521,31 @@ proc isFriendRelationship(relType: int): bool =
   ## Discord relationship type 1 = friend.
   relType == 1
 
+proc isBlockedRelationship(relType: int): bool =
+  ## Discord relationship type 2 = blocked.
+  relType == 2
+
 proc handleRelationshipChange*(ctx: UserContext, userId: string, nickname: string, relType: int) =
   if ctx.runtime == nil or ctx.runtime.portals == nil:
     return
-  let portal = ctx.runtime.portals.findPrivateChatWith(ctx.discordId, userId)
-  if not portal.found:
+  let portals = ctx.runtime.portals.db.findPrivateChatsWith(userId, dmType = 1)
+  if portals.len == 0:
     return
-  if isFriendRelationship(relType):
-    var rec = portal.rec
-    rec.friendNick = true
-    if nickname.len > 0:
-      rec.name = nickname
-      rec.nameSet = true
-    ctx.runtime.portals.upsert(rec)
-  else:
-    var rec = portal.rec
-    rec.friendNick = false
+
+  for portal in portals:
+    var rec = portal
+    if isFriendRelationship(relType):
+      rec.friendNick = true
+      rec.blocked = false
+      if nickname.len > 0:
+        rec.name = nickname
+        rec.nameSet = true
+    elif isBlockedRelationship(relType):
+      rec.friendNick = false
+      rec.blocked = true
+    else:
+      rec.friendNick = false
+      rec.blocked = false
     ctx.runtime.portals.upsert(rec)
 
 proc relationshipAddHandler*(ctx: UserContext, rel: DiscordRelationship) =

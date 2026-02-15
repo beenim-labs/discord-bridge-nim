@@ -36,6 +36,7 @@ type
     name*: string
     nameSet*: bool
     friendNick*: bool
+    blocked*: bool
     topic*: string
     topicSet*: bool
     avatar*: string

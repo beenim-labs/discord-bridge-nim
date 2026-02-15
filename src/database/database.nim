@@ -99,6 +99,15 @@ proc applyLatestSqliteSchema*(dbPath: string): tuple[ok: bool, err: string] =
     if not ensureHeartbeat.ok:
       return (false, "failed to backfill heartbeat_session column: " & ensureHeartbeat.err)
 
+    let ensurePortalBlocked = ensureSqliteColumn(
+      conn,
+      "portal",
+      "blocked",
+      "blocked BOOLEAN NOT NULL DEFAULT false",
+    )
+    if not ensurePortalBlocked.ok:
+      return (false, "failed to backfill portal.blocked column: " & ensurePortalBlocked.err)
+
     return (true, "")
 
   let scriptText = readFile(script.path)
