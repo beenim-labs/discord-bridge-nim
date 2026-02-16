@@ -48,18 +48,18 @@ proc ensureRegFileExists(path: string) =
     raise newException(IOError, "registration file not found: " & path)
 
 proc parseCommandBody(event: MatrixEvent): string =
-  if event.content.kind != JObject:
+  if event.content.isNil or event.content.kind != JObject:
     return ""
   event.content{"body"}.getStr("").strip()
 
 proc parseReplyTargetEventId(event: MatrixEvent): string =
-  if event.content.kind != JObject:
+  if event.content.isNil or event.content.kind != JObject:
     return ""
   let relatesTo = event.content{"m.relates_to"}
-  if relatesTo.kind != JObject:
+  if relatesTo.isNil or relatesTo.kind != JObject:
     return ""
   let inReplyTo = relatesTo{"m.in_reply_to"}
-  if inReplyTo.kind != JObject:
+  if inReplyTo.isNil or inReplyTo.kind != JObject:
     return ""
   inReplyTo{"event_id"}.getStr("").strip()
 
@@ -139,6 +139,8 @@ proc relayRoomMessageToDiscord(svc: DiscordBridgeService, event: MatrixEvent) =
     return
 
   let rest = newDiscordRestClient(sender.rec.discordToken)
+  defer:
+    rest.close()
   let replyResolution = svc.resolveDiscordReplyMessageId(portal.rec.key, replyEventId)
   if replyEventId.len > 0:
     let hasReference = if replyResolution.discordMessageId.len > 0: "1" else: "0"
@@ -266,7 +268,13 @@ proc close*(svc: DiscordBridgeService) =
 proc run*(svc: DiscordBridgeService) =
   if svc.runtime != nil:
     svc.runtime.start()
-  if svc.provisioning != nil:
-    svc.provisioning.resumePersistedDiscordSessions()
   info(fmt"Starting bridge-discord-nim as {svc.cfg.appservice.id} on {svc.cfg.appservice.hostname}:{svc.cfg.appservice.port}")
+  if svc.provisioning != nil:
+    asyncCheck (proc() {.async.} =
+      await sleepAsync(0)
+      try:
+        svc.provisioning.resumePersistedDiscordSessions()
+      except CatchableError as e:
+        warn("[provisioning] startup resume crashed: " & e.msg)
+    )()
   waitFor svc.appservice.runForever()

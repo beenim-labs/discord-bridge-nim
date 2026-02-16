@@ -162,6 +162,23 @@ proc warnPolling(api: ProvisioningApi, mxid: string, message: string) =
   api.setPollingState(mxid, state)
   warn(message)
 
+proc isFdExhaustionError(message: string): bool =
+  message.toLowerAscii().contains("too many open files")
+
+proc warnFdExhaustion(api: ProvisioningApi, mxid, channelId, context, detail: string) =
+  if not isFdExhaustionError(detail):
+    return
+  var msg = "[FD-EXHAUSTION] context=" & context
+  if mxid.len > 0:
+    msg &= " mxid=" & mxid
+  if channelId.len > 0:
+    msg &= " channel=" & channelId
+  msg &= " err=" & detail
+  if mxid.len > 0:
+    api.warnPolling(mxid, msg)
+  else:
+    warn(msg)
+
 proc clearDiscordSessionForInvalidToken(api: ProvisioningApi, mxid: string, reason: string) =
   if not api.runtimeManagersReady():
     return
@@ -267,7 +284,10 @@ proc verifyDiscordTokenWithRest(token: string): tuple[
 ] =
   if token.len == 0:
     return (false, "", "", "", "empty token")
-  let me = newDiscordRestClient(token).getCurrentUser()
+  let rest = newDiscordRestClient(token)
+  defer:
+    rest.close()
+  let me = rest.getCurrentUser()
   if not me.ok:
     return (false, "", "", "", if me.err.len > 0: me.err else: "discord auth failed")
   if me.body.isNil or me.body.kind != JObject:
@@ -404,6 +424,11 @@ proc matrixClientRequestAsUser(
     (false, int(resp.code), parsed, raw, err)
   except CatchableError as e:
     (false, 0, newJNull(), "", e.msg)
+  finally:
+    try:
+      http.close()
+    except CatchableError:
+      discard
 
 proc matrixErrCode(resp: tuple[ok: bool, status: int, body: JsonNode, raw: string, err: string]): string =
   if resp.body.isNil or resp.body.kind != JObject:
@@ -686,6 +711,11 @@ proc matrixCreateRoomAsBot(
     (true, roomId, "")
   except CatchableError as e:
     (false, "", "createRoom request failed: " & e.msg)
+  finally:
+    try:
+      http.close()
+    except CatchableError:
+      discard
 
 proc channelTypeName(channelType: int): string =
   case channelType
@@ -1185,6 +1215,8 @@ proc syncPrivateChannelMessagesPage(
     return
 
   let rest = newDiscordRestClient(user.discordToken)
+  defer:
+    rest.close()
   var collected: seq[JsonNode] = @[]
   let maxMessages = max(1, limit)
   var lastFetchCount = 0
@@ -1203,6 +1235,7 @@ proc syncPrivateChannelMessagesPage(
           rest.getChannelMessages(rec.key.channelId, limit = limit, after = after)
       if not fetched.ok:
         result.err = "Failed to fetch Discord messages for channel " & rec.key.channelId & ": " & fetched.err
+        api.warnFdExhaustion(user.mxid, rec.key.channelId, "syncPrivateChannelMessagesPage-after", fetched.err)
         if collected.len == 0:
           return
         break
@@ -1234,6 +1267,7 @@ proc syncPrivateChannelMessagesPage(
           rest.getChannelMessages(rec.key.channelId, limit = limit, before = before)
       if not fetched.ok:
         result.err = "Failed to fetch Discord messages for channel " & rec.key.channelId & ": " & fetched.err
+        api.warnFdExhaustion(user.mxid, rec.key.channelId, "syncPrivateChannelMessagesPage-before", fetched.err)
         if collected.len == 0:
           return
         break
@@ -1501,6 +1535,8 @@ proc fetchLatestDiscordMessagesForFallback(
       api.fetchDiscordMessages(user.discordToken, channelId, capped, "", "")
     else:
       let rest = newDiscordRestClient(user.discordToken)
+      defer:
+        rest.close()
       rest.getChannelMessages(channelId, limit = capped)
   if not fetched.ok or fetched.body.isNil or fetched.body.kind != JArray:
     return
@@ -1594,8 +1630,11 @@ proc bootstrapPrivateChannels(
   var channels = prefetchedChannels
   if channels.isNil:
     let rest = newDiscordRestClient(user.discordToken)
+    defer:
+      rest.close()
     let fetched = rest.getPrivateChannels()
     if not fetched.ok:
+      api.warnFdExhaustion(user.mxid, "", "bootstrapPrivateChannels-getPrivateChannels", fetched.err)
       warn("Failed to fetch Discord private channels for " & user.mxid & ": " & fetched.err)
       return
     if fetched.body.isNil or fetched.body.kind != JArray:
@@ -1610,6 +1649,8 @@ proc bootstrapPrivateChannels(
   var linked = 0
   var messageSynced = 0
   let rest = newDiscordRestClient(user.discordToken)
+  defer:
+    rest.close()
   let relationshipFetch = api.fetchDiscordRelationshipMap(user, rest, "bootstrap")
   let relationshipSyncAvailable = relationshipFetch.ok
   if not relationshipSyncAvailable and isUnauthorizedDiscordError(relationshipFetch.status, relationshipFetch.err):
@@ -1764,7 +1805,10 @@ proc startPrivateChannelPolling(api: ProvisioningApi, mxid: string) =
       shouldStart = true
   if shouldStart:
     api.setPollingState(mxid, PollingState(delayMs: 5000))
-    asyncCheck api.runPrivateChannelPolling(mxid)
+    try:
+      asyncCheck api.runPrivateChannelPolling(mxid)
+    except CatchableError as e:
+      api.warnPolling(mxid, "[provisioning] failed to start private channel polling for " & mxid & ": " & e.msg)
 
 proc kickImmediatePrivateChannelSync(api: ProvisioningApi, mxid: string) =
   if not api.runtimeManagersReady() or mxid.len == 0:
@@ -1786,11 +1830,14 @@ proc kickImmediatePrivateChannelSync(api: ProvisioningApi, mxid: string) =
       return
 
     let rest = newDiscordRestClient(current.rec.discordToken)
+    defer:
+      rest.close()
     let fetched = rest.getPrivateChannels()
     if not fetched.ok:
       if isUnauthorizedDiscordError(fetched.status, fetched.err):
         api.clearDiscordSessionForInvalidToken(mxid, if fetched.err.len > 0: fetched.err else: "unauthorized")
       else:
+        api.warnFdExhaustion(mxid, "", "kickImmediatePrivateChannelSync-getPrivateChannels", fetched.err)
         api.warnPolling(mxid, "[provisioning] immediate private channel sync failed for " & mxid & ": " & fetched.err)
       return
     if fetched.body.isNil or fetched.body.kind != JArray:
@@ -1813,6 +1860,7 @@ proc kickImmediatePrivateChannelSync(api: ProvisioningApi, mxid: string) =
   )()
 
 proc runPrivateChannelPolling(api: ProvisioningApi, mxid: string): Future[void] {.async.} =
+  await sleepAsync(0)
   randomize()
   defer:
     withLock api.lock:
@@ -1820,82 +1868,90 @@ proc runPrivateChannelPolling(api: ProvisioningApi, mxid: string): Future[void] 
       if api.pollingState.hasKey(mxid):
         api.pollingState.del(mxid)
 
-  var state = api.getPollingState(mxid)
-  if state.delayMs <= 0:
-    state.delayMs = 5000
-  api.setPollingState(mxid, state)
-  while true:
-    if not api.runtimeManagersReady():
-      break
-    let current = api.runtime.db.getUserByMXID(mxid)
-    if not current.found or current.rec.discordToken.len == 0:
-      break
-
-    let rest = newDiscordRestClient(current.rec.discordToken)
-    let fetched = rest.getPrivateChannels()
-    if not fetched.ok:
-      if isUnauthorizedDiscordError(fetched.status, fetched.err):
-        api.clearDiscordSessionForInvalidToken(mxid, if fetched.err.len > 0: fetched.err else: "unauthorized")
+  try:
+    var state = api.getPollingState(mxid)
+    if state.delayMs <= 0:
+      state.delayMs = 5000
+    api.setPollingState(mxid, state)
+    while true:
+      if not api.runtimeManagersReady():
         break
-      let warnMsg = "[provisioning] private channel poll failed for " & mxid & ": " & fetched.err
-      api.warnPolling(mxid, warnMsg)
-      state = api.getPollingState(mxid)
-      state.stableCycles = 0
-      state.delayMs = min(60000, max(5000, max(state.delayMs, 5000) * 2))
-      api.setPollingState(mxid, state)
-      let delay = state.delayMs + rand(500)
-      await sleepAsync(delay)
-      continue
-
-    if fetched.body.isNil or fetched.body.kind != JArray:
-      api.warnPolling(mxid, "[provisioning] private channel poll returned non-array payload for " & mxid)
-      state = api.getPollingState(mxid)
-      state.stableCycles = 0
-      state.delayMs = min(60000, max(5000, max(state.delayMs, 5000) * 2))
-      api.setPollingState(mxid, state)
-      let delay = state.delayMs + rand(500)
-      await sleepAsync(delay)
-      continue
-
-    let snapshot = privateChannelSnapshot(fetched.body)
-    state = api.getPollingState(mxid)
-    let unchanged = snapshot.len > 0 and snapshot == state.lastSnapshot
-    try:
-      # Bootstrap only when channel snapshot changed; this avoids expensive
-      # full DM/channel sync every poll interval during steady state.
-      if not unchanged:
-        api.bootstrapPrivateChannels(current.rec, logLinkedOnly = false, prefetchedChannels = fetched.body)
-        state.stableCycles = 0
-        state.lastRelationshipSyncMs = nowMs()
-      else:
-        inc state.stableCycles
-      let nowTs = nowMs()
-      let shouldSyncRelationships =
-        unchanged and (
-          state.lastRelationshipSyncMs <= 0 or
-          (nowTs - state.lastRelationshipSyncMs) >= 30000
-        )
-      if shouldSyncRelationships:
-        let relationshipFetch = api.fetchDiscordRelationshipMap(current.rec, rest, "poll")
-        if relationshipFetch.ok:
-          api.applyDiscordRelationshipMapToDmPortals(relationshipFetch.relationships, "poll")
-          state.lastRelationshipSyncMs = nowTs
-        elif isUnauthorizedDiscordError(relationshipFetch.status, relationshipFetch.err):
-          break
-      state.lastSnapshot = snapshot
-      state.delayMs = nextPollingDelayMs(state.stableCycles)
-      api.setPollingState(mxid, state)
-    except CatchableError as e:
-      if isUnauthorizedDiscordError(0, e.msg):
-        api.clearDiscordSessionForInvalidToken(mxid, e.msg)
+      let current = api.runtime.db.getUserByMXID(mxid)
+      if not current.found or current.rec.discordToken.len == 0:
         break
-      let warnMsg = "[provisioning] private channel poll failed for " & mxid & ": " & e.msg
-      api.warnPolling(mxid, warnMsg)
-      state.stableCycles = 0
-      state.delayMs = min(60000, max(5000, max(state.delayMs, 5000) * 2))
-      api.setPollingState(mxid, state)
-    let delay = max(1000, state.delayMs + rand(750))
-    await sleepAsync(delay)
+
+      let rest = newDiscordRestClient(current.rec.discordToken)
+      try:
+        let fetched = rest.getPrivateChannels()
+        if not fetched.ok:
+          if isUnauthorizedDiscordError(fetched.status, fetched.err):
+            api.clearDiscordSessionForInvalidToken(mxid, if fetched.err.len > 0: fetched.err else: "unauthorized")
+            break
+          api.warnFdExhaustion(mxid, "", "runPrivateChannelPolling-getPrivateChannels", fetched.err)
+          let warnMsg = "[provisioning] private channel poll failed for " & mxid & ": " & fetched.err
+          api.warnPolling(mxid, warnMsg)
+          state = api.getPollingState(mxid)
+          state.stableCycles = 0
+          state.delayMs = min(60000, max(5000, max(state.delayMs, 5000) * 2))
+          api.setPollingState(mxid, state)
+          let delay = state.delayMs + rand(500)
+          await sleepAsync(delay)
+          continue
+
+        if fetched.body.isNil or fetched.body.kind != JArray:
+          api.warnPolling(mxid, "[provisioning] private channel poll returned non-array payload for " & mxid)
+          state = api.getPollingState(mxid)
+          state.stableCycles = 0
+          state.delayMs = min(60000, max(5000, max(state.delayMs, 5000) * 2))
+          api.setPollingState(mxid, state)
+          let delay = state.delayMs + rand(500)
+          await sleepAsync(delay)
+          continue
+
+        let snapshot = privateChannelSnapshot(fetched.body)
+        state = api.getPollingState(mxid)
+        let unchanged = snapshot.len > 0 and snapshot == state.lastSnapshot
+        try:
+          # Bootstrap only when channel snapshot changed; this avoids expensive
+          # full DM/channel sync every poll interval during steady state.
+          if not unchanged:
+            api.bootstrapPrivateChannels(current.rec, logLinkedOnly = false, prefetchedChannels = fetched.body)
+            state.stableCycles = 0
+            state.lastRelationshipSyncMs = nowMs()
+          else:
+            inc state.stableCycles
+          let nowTs = nowMs()
+          let shouldSyncRelationships =
+            unchanged and (
+              state.lastRelationshipSyncMs <= 0 or
+              (nowTs - state.lastRelationshipSyncMs) >= 30000
+            )
+          if shouldSyncRelationships:
+            let relationshipFetch = api.fetchDiscordRelationshipMap(current.rec, rest, "poll")
+            if relationshipFetch.ok:
+              api.applyDiscordRelationshipMapToDmPortals(relationshipFetch.relationships, "poll")
+              state.lastRelationshipSyncMs = nowTs
+            elif isUnauthorizedDiscordError(relationshipFetch.status, relationshipFetch.err):
+              break
+          state.lastSnapshot = snapshot
+          state.delayMs = nextPollingDelayMs(state.stableCycles)
+          api.setPollingState(mxid, state)
+        except CatchableError as e:
+          if isUnauthorizedDiscordError(0, e.msg):
+            api.clearDiscordSessionForInvalidToken(mxid, e.msg)
+            break
+          api.warnFdExhaustion(mxid, "", "runPrivateChannelPolling-bootstrap", e.msg)
+          let warnMsg = "[provisioning] private channel poll failed for " & mxid & ": " & e.msg
+          api.warnPolling(mxid, warnMsg)
+          state.stableCycles = 0
+          state.delayMs = min(60000, max(5000, max(state.delayMs, 5000) * 2))
+          api.setPollingState(mxid, state)
+        let delay = max(1000, state.delayMs + rand(750))
+        await sleepAsync(delay)
+      finally:
+        rest.close()
+  except CatchableError as e:
+    api.warnPolling(mxid, "[provisioning] private channel poll crashed for " & mxid & ": " & e.msg)
 
 proc detachDiscordIdentity(api: ProvisioningApi, owningMxid, discordId: string) =
   if discordId.len == 0:
@@ -1979,39 +2035,60 @@ proc resumePersistedDiscordSessions*(api: ProvisioningApi) =
   var resumed = 0
   var failed = 0
   for rec in usersWithToken:
-    if rec.mxid.len == 0:
-      continue
-    let token = rec.discordToken.strip()
-    if token.len == 0:
-      continue
+    try:
+      if rec.mxid.len == 0:
+        continue
+      let token = rec.discordToken.strip()
+      if token.len == 0:
+        continue
 
-    var user = rec
-    user.discordToken = token
-    var session = api.getSessionState(user.mxid)
-    let verified = api.verifyDiscordToken(token)
-    if not verified.ok:
+      var user = rec
+      user.discordToken = token
+      var session = api.getSessionState(user.mxid)
+      var verified = (
+        ok: false,
+        discordId: "",
+        username: "",
+        discriminator: "",
+        err: ""
+      )
+      try:
+        verified = api.verifyDiscordToken(token)
+      except CatchableError as e:
+        verified.err = "token verification failed: " & e.msg
+
+      if not verified.ok:
+        inc failed
+        warn("[provisioning] startup resume failed for " & user.mxid & ": " & verified.err)
+        let errLower = verified.err.toLowerAscii()
+        let invalidToken =
+          errLower.contains("401") or
+          errLower.contains("unauthorized") or
+          errLower.contains("invalid token")
+        session.connected = false
+        session.lastHeartbeatAck = 0
+        session.lastHeartbeatSent = 0
+        user.heartbeatSessionJson = sessionStateJson(session)
+        if invalidToken:
+          user.discordToken = ""
+          user.discordId = ""
+          warn("[provisioning] cleared invalid Discord token for " & user.mxid)
+        api.storeSessionState(user.mxid, session)
+        api.storeUser(user)
+        continue
+
+      api.markSessionConnected(user, session, verified.discordId, verified.username, verified.discriminator)
+      try:
+        api.startPrivateChannelPolling(user.mxid)
+      except CatchableError as e:
+        inc failed
+        warn("[provisioning] startup resume failed to start polling for " & user.mxid & ": " & e.msg)
+        continue
+      inc resumed
+    except CatchableError as e:
       inc failed
-      warn("[provisioning] startup resume failed for " & user.mxid & ": " & verified.err)
-      let errLower = verified.err.toLowerAscii()
-      let invalidToken =
-        errLower.contains("401") or
-        errLower.contains("unauthorized") or
-        errLower.contains("invalid token")
-      session.connected = false
-      session.lastHeartbeatAck = 0
-      session.lastHeartbeatSent = 0
-      user.heartbeatSessionJson = sessionStateJson(session)
-      if invalidToken:
-        user.discordToken = ""
-        user.discordId = ""
-        warn("[provisioning] cleared invalid Discord token for " & user.mxid)
-      api.storeSessionState(user.mxid, session)
-      api.storeUser(user)
-      continue
-
-    api.markSessionConnected(user, session, verified.discordId, verified.username, verified.discriminator)
-    api.startPrivateChannelPolling(user.mxid)
-    inc resumed
+      let userLabel = if rec.mxid.len > 0: rec.mxid else: "<unknown>"
+      warn("[provisioning] startup resume failed for " & userLabel & ": " & e.msg)
 
   info("[provisioning] startup resume complete: resumed=" & $resumed & " failed=" & $failed)
 
@@ -2051,6 +2128,8 @@ proc handleDiscordChatAction(api: ProvisioningApi, user: UserRecord, body: strin
     return provisioningResult(Http400, errorResponse("Chat action is only available for Discord DMs", ErrCodeBadJson))
 
   let rest = newDiscordRestClient(user.discordToken)
+  defer:
+    rest.close()
   var relationshipTargetUserId = rec.otherUserId
   if action in ["block", "unblock", "add-friend", "remove-friend"]:
     if rec.portalType != 1:

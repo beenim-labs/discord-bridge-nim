@@ -44,6 +44,8 @@ proc newDiscordSession*(gatewayUrl = DefaultGatewayUrl): DiscordSession =
   )
 
 proc login*(s: DiscordSession, token: string) =
+  if s.rest != nil:
+    s.rest.close()
   s.token = token
   s.rest = newDiscordRestClient(token)
   s.lastError = ""
@@ -51,6 +53,9 @@ proc login*(s: DiscordSession, token: string) =
 proc disconnect*(s: DiscordSession, reason = "manual disconnect") =
   if s.ws != nil:
     s.ws.close()
+  if s.rest != nil:
+    s.rest.close()
+    s.rest = nil
   s.gateway.markDisconnected(reason)
   s.connected = false
   s.lastError = reason

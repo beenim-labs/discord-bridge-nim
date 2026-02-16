@@ -31,6 +31,14 @@ proc newDiscordRestClient*(token: string, baseUrl = DefaultDiscordApiBase, userA
     http: newHttpClient()
   )
 
+proc close*(c: DiscordRestClient) =
+  if c.isNil or c.http.isNil:
+    return
+  try:
+    c.http.close()
+  except CatchableError:
+    discard
+
 proc buildHeaders(c: DiscordRestClient, includeJsonContentType = true, browserLike = false): HttpHeaders =
   var h = newHttpHeaders()
   h["Authorization"] = c.token

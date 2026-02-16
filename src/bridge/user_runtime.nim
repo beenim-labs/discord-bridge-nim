@@ -46,7 +46,10 @@ proc newUserStartupCoordinator*(db: BridgeDb, users: UserManager): UserStartupCo
   result.verifyToken = proc(token: string): tuple[ok: bool, err: string] {.closure, gcsafe.} =
     if token.len == 0:
       return (false, "not logged in")
-    let me = newDiscordRestClient(token).getCurrentUser()
+    let rest = newDiscordRestClient(token)
+    defer:
+      rest.close()
+    let me = rest.getCurrentUser()
     if me.ok:
       return (true, "")
     let status = if me.status > 0: "status " & $me.status else: "network error"

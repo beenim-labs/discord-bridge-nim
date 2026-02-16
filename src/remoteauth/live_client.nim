@@ -60,6 +60,11 @@ proc droidWsHeaders(): Table[string, string] =
 
 proc loginWithTicket(apiBaseUrl, ticket: string): tuple[ok: bool, encryptedToken: string, err: string] =
   var cli = newHttpClient()
+  defer:
+    try:
+      cli.close()
+    except CatchableError:
+      discard
   cli.headers = newHttpHeaders({
     "User-Agent": DroidUserAgent,
     "Origin": "https://discord.com",
