@@ -2,7 +2,8 @@
 
 {.push warning[Uninit]: off, warning[ProveInit]: off.}
 
-import std/[net, uri, strutils, tables, times, base64, random, sha1]
+import std/[net, uri, strutils, tables, times, base64, random]
+import checksums/sha1
 
 type
   WsConnState* = enum

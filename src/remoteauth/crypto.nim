@@ -11,14 +11,14 @@ proc EVP_PKEY_CTX_new_id(id: cint, e: ENGINE): EVP_PKEY_CTX {.cdecl, dynlib: DLL
 proc EVP_PKEY_keygen_init(ctx: EVP_PKEY_CTX): cint {.cdecl, dynlib: DLLUtilName, importc.}
 proc EVP_PKEY_keygen(ctx: EVP_PKEY_CTX, ppkey: ptr EVP_PKEY): cint {.cdecl, dynlib: DLLUtilName, importc.}
 proc EVP_PKEY_encrypt_init(ctx: EVP_PKEY_CTX): cint {.cdecl, dynlib: DLLUtilName, importc.}
-proc EVP_PKEY_encrypt(ctx: EVP_PKEY_CTX, outBuf: ptr cuchar, outLen: ptr csize_t, inBuf: ptr cuchar, inLen: csize_t): cint {.cdecl, dynlib: DLLUtilName, importc.}
+proc EVP_PKEY_encrypt(ctx: EVP_PKEY_CTX, outBuf: ptr uint8, outLen: ptr csize_t, inBuf: ptr uint8, inLen: csize_t): cint {.cdecl, dynlib: DLLUtilName, importc.}
 proc EVP_PKEY_decrypt_init(ctx: EVP_PKEY_CTX): cint {.cdecl, dynlib: DLLUtilName, importc.}
-proc EVP_PKEY_decrypt(ctx: EVP_PKEY_CTX, outBuf: ptr cuchar, outLen: ptr csize_t, inBuf: ptr cuchar, inLen: csize_t): cint {.cdecl, dynlib: DLLUtilName, importc.}
+proc EVP_PKEY_decrypt(ctx: EVP_PKEY_CTX, outBuf: ptr uint8, outLen: ptr csize_t, inBuf: ptr uint8, inLen: csize_t): cint {.cdecl, dynlib: DLLUtilName, importc.}
 proc EVP_PKEY_CTX_ctrl(ctx: EVP_PKEY_CTX, keytype, optype, cmd, p1: cint, p2: pointer): cint {.cdecl, dynlib: DLLUtilName, importc.}
 proc EVP_PKEY_CTX_ctrl_str(ctx: EVP_PKEY_CTX, name, value: cstring): cint {.cdecl, dynlib: DLLUtilName, importc.}
 
-proc i2d_PUBKEY(a: EVP_PKEY, pp: ptr ptr cuchar): cint {.cdecl, dynlib: DLLUtilName, importc.}
-proc d2i_PUBKEY(a: ptr EVP_PKEY, pp: ptr ptr cuchar, len: clong): EVP_PKEY {.cdecl, dynlib: DLLUtilName, importc.}
+proc i2d_PUBKEY(a: EVP_PKEY, pp: ptr ptr uint8): cint {.cdecl, dynlib: DLLUtilName, importc.}
+proc d2i_PUBKEY(a: ptr EVP_PKEY, pp: ptr ptr uint8, len: clong): EVP_PKEY {.cdecl, dynlib: DLLUtilName, importc.}
 
 const
   EVP_PKEY_OP_KEYGEN = (1 shl 2)
@@ -142,7 +142,7 @@ proc newRemoteAuthKeypair*(): tuple[ok: bool, kp: RemoteAuthKeypair, err: string
       return (false, nil, "i2d_PUBKEY failed")
 
     var pubBytes = newSeq[byte](pubLen)
-    var pubWritePtr = cast[ptr cuchar](addr pubBytes[0])
+    var pubWritePtr = cast[ptr uint8](addr pubBytes[0])
     if i2d_PUBKEY(pkey, addr pubWritePtr) <= 0:
       EVP_PKEY_free(pkey)
       return (false, nil, "i2d_PUBKEY encode failed")
@@ -188,12 +188,12 @@ proc decryptPayload*(kp: RemoteAuthKeypair, b64Payload: string): tuple[ok: bool,
       return (false, "", oaep.err)
 
     var outLen: csize_t = 0
-    let inPtr = if decoded.data.len > 0: cast[ptr cuchar](unsafeAddr decoded.data[0]) else: cast[ptr cuchar](nil)
+    let inPtr = if decoded.data.len > 0: cast[ptr uint8](unsafeAddr decoded.data[0]) else: cast[ptr uint8](nil)
     if EVP_PKEY_decrypt(ctx, nil, addr outLen, inPtr, csize_t(decoded.data.len)) != 1 or outLen == 0:
       return (false, "", "EVP_PKEY_decrypt size probe failed")
 
     var plaintext = newSeq[byte](int(outLen))
-    if EVP_PKEY_decrypt(ctx, cast[ptr cuchar](addr plaintext[0]), addr outLen, inPtr, csize_t(decoded.data.len)) != 1:
+    if EVP_PKEY_decrypt(ctx, cast[ptr uint8](addr plaintext[0]), addr outLen, inPtr, csize_t(decoded.data.len)) != 1:
       return (false, "", "EVP_PKEY_decrypt failed")
     if int(outLen) < plaintext.len:
       plaintext.setLen(int(outLen))
@@ -208,7 +208,7 @@ proc encryptWithPublicKeyRawStd*(encodedPublicKey, plaintext: string): tuple[ok:
     return (false, "", decoded.err)
 
   var pubKey: EVP_PKEY = nil
-  var pubPtr: ptr cuchar = if decoded.data.len > 0: cast[ptr cuchar](unsafeAddr decoded.data[0]) else: cast[ptr cuchar](nil)
+  var pubPtr: ptr uint8 = if decoded.data.len > 0: cast[ptr uint8](unsafeAddr decoded.data[0]) else: cast[ptr uint8](nil)
   var ctx: EVP_PKEY_CTX = nil
   try:
     pubKey = d2i_PUBKEY(nil, addr pubPtr, clong(decoded.data.len))
@@ -232,14 +232,14 @@ proc encryptWithPublicKeyRawStd*(encodedPublicKey, plaintext: string): tuple[ok:
       return (false, "", oaep.err)
 
     let plainBytes = stringToBytes(plaintext)
-    let inPtr = if plainBytes.len > 0: cast[ptr cuchar](unsafeAddr plainBytes[0]) else: cast[ptr cuchar](nil)
+    let inPtr = if plainBytes.len > 0: cast[ptr uint8](unsafeAddr plainBytes[0]) else: cast[ptr uint8](nil)
 
     var outLen: csize_t = 0
     if EVP_PKEY_encrypt(ctx, nil, addr outLen, inPtr, csize_t(plainBytes.len)) != 1 or outLen == 0:
       return (false, "", "EVP_PKEY_encrypt size probe failed")
 
     var encrypted = newSeq[byte](int(outLen))
-    if EVP_PKEY_encrypt(ctx, cast[ptr cuchar](addr encrypted[0]), addr outLen, inPtr, csize_t(plainBytes.len)) != 1:
+    if EVP_PKEY_encrypt(ctx, cast[ptr uint8](addr encrypted[0]), addr outLen, inPtr, csize_t(plainBytes.len)) != 1:
       return (false, "", "EVP_PKEY_encrypt failed")
     if int(outLen) < encrypted.len:
       encrypted.setLen(int(outLen))

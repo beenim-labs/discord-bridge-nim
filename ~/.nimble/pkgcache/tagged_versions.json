@@ -1,0 +1,16 @@
+{
+  "checksums": [
+    {
+      "name": "checksums",
+      "version": {
+        "version": "0.2.1",
+        "speSemanticVersion": null
+      },
+      "requires": [
+        "nim >= 2.0.0"
+      ],
+      "isRoot": false,
+      "url": ""
+    }
+  ]
+}
