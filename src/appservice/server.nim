@@ -5,6 +5,8 @@ import appservice/registration
 import config/config
 import common/logging
 
+{.push warning[Uninit]: off.}
+
 type
   MatrixEvent* = object
     eventId*: string
@@ -42,25 +44,72 @@ type
     extraHealth*: HealthProvider
     onCustomRequest*: CustomRequestHandler
 
+  AppserviceAuthSource* = enum
+    aasMissing
+    aasMalformed
+    aasBearer
+    aasQuery
+
+  AppserviceAuthDecision* = object
+    ok*: bool
+    source*: AppserviceAuthSource
+
 const
   AppTxPrefix = "/_matrix/app/v1/transactions/"
   LegacyTxPrefix = "/transactions/"
 
-proc queryParam(req: Request, name: string): string =
-  if req.url.query.len == 0:
+proc queryParam*(query: string, name: string): string =
+  if query.len == 0:
     return ""
-  for key, val in decodeQuery(req.url.query):
+  for key, val in decodeQuery(query):
     if key == name:
       return val
   ""
 
-proc isAuthorized(server: AppserviceServer, req: Request): bool =
-  let access = queryParam(req, "access_token")
-  access.len > 0 and access == server.reg.hsToken
+proc authSourceLabel*(source: AppserviceAuthSource): string =
+  case source
+  of aasMissing:
+    "missing"
+  of aasMalformed:
+    "malformed"
+  of aasBearer:
+    "bearer"
+  of aasQuery:
+    "query"
 
-proc jsonResponse(req: Request, code: HttpCode, payload: JsonNode) {.async.} =
+proc authorizeAppserviceRequest*(
+    headers: HttpHeaders,
+    query: string,
+    expectedHsToken: string
+): AppserviceAuthDecision =
+  let authHeader = headers.getOrDefault("Authorization").strip()
+  if authHeader.len > 0:
+    if not authHeader.startsWith("Bearer "):
+      return AppserviceAuthDecision(ok: false, source: aasMalformed)
+    let token = authHeader["Bearer ".len .. ^1].strip()
+    if token.len == 0:
+      return AppserviceAuthDecision(ok: false, source: aasMalformed)
+    return AppserviceAuthDecision(ok: token == expectedHsToken, source: aasBearer)
+
+  let access = queryParam(query, "access_token").strip()
+  if access.len > 0:
+    return AppserviceAuthDecision(ok: access == expectedHsToken, source: aasQuery)
+
+  AppserviceAuthDecision(ok: false, source: aasMissing)
+
+proc requestAuthDecision(server: AppserviceServer, req: Request): AppserviceAuthDecision =
+  authorizeAppserviceRequest(req.headers, req.url.query, server.reg.hsToken)
+
+proc logAuthRejection(req: Request, source: AppserviceAuthSource) =
+  warn(
+    "Rejected appservice auth source=" & authSourceLabel(source) &
+      " method=" & $req.reqMethod &
+      " path=" & req.url.path
+  )
+
+proc jsonResponse(req: Request, code: HttpCode, payload: JsonNode): Future[void] =
   let headers = newHttpHeaders({"Content-Type": "application/json"})
-  await req.respond(code, $payload, headers)
+  req.respond(code, $payload, headers)
 
 proc extractTxnId*(path: string): string =
   if path.startsWith(AppTxPrefix):
@@ -129,13 +178,17 @@ proc healthPayload(server: AppserviceServer): JsonNode =
       for k, v in ext:
         result[k] = v
 
-proc dispatchTransaction(server: AppserviceServer, tx: AppserviceTransaction): Future[void] {.async.} =
+proc dispatchTransaction(server: AppserviceServer, tx: AppserviceTransaction): Future[void] =
   if server.onTransaction == nil:
-    return
-  await server.onTransaction(tx)
+    let done = newFuture[void]("dispatchTransaction")
+    done.complete()
+    return done
+  server.onTransaction(tx)
 
-proc handleTransactionRequest(server: AppserviceServer, req: Request) {.async.} =
-  if not server.isAuthorized(req):
+proc handleTransactionRequest(server: AppserviceServer, req: Request): Future[void] {.async.} =
+  let auth = requestAuthDecision(server, req)
+  if not auth.ok:
+    logAuthRejection(req, auth.source)
     await jsonResponse(req, Http401, %*{"errcode": "M_UNAUTHORIZED", "error": "Invalid appservice token"})
     return
 
@@ -171,7 +224,7 @@ proc handleTransactionRequest(server: AppserviceServer, req: Request) {.async.} 
     err("Transaction handler failed for " & txId & ": " & e.msg)
     await jsonResponse(req, Http500, %*{"errcode": "M_UNKNOWN", "error": "Transaction handling failed"})
 
-proc handleRequest(server: AppserviceServer, req: Request) {.async.} =
+proc handleRequest(server: AppserviceServer, req: Request): Future[void] {.async.} =
   let p = req.url.path
 
   if req.reqMethod == HttpGet and (p == "/health" or p == "/_matrix/app/v1/ping"):
@@ -184,7 +237,9 @@ proc handleRequest(server: AppserviceServer, req: Request) {.async.} =
     return
 
   if req.reqMethod == HttpGet and p.startsWith("/_matrix/app/v1/users/"):
-    if not server.isAuthorized(req):
+    let auth = requestAuthDecision(server, req)
+    if not auth.ok:
+      logAuthRejection(req, auth.source)
       await jsonResponse(req, Http401, %*{"errcode": "M_UNAUTHORIZED", "error": "Invalid appservice token"})
       return
     let userId = decodeUrl(p["/_matrix/app/v1/users/".len .. ^1])
@@ -195,7 +250,9 @@ proc handleRequest(server: AppserviceServer, req: Request) {.async.} =
     return
 
   if req.reqMethod == HttpGet and p.startsWith("/_matrix/app/v1/rooms/"):
-    if not server.isAuthorized(req):
+    let auth = requestAuthDecision(server, req)
+    if not auth.ok:
+      logAuthRejection(req, auth.source)
       await jsonResponse(req, Http401, %*{"errcode": "M_UNAUTHORIZED", "error": "Invalid appservice token"})
       return
     let roomAlias = decodeUrl(p["/_matrix/app/v1/rooms/".len .. ^1])
@@ -217,7 +274,7 @@ proc handleRequest(server: AppserviceServer, req: Request) {.async.} =
 
   await jsonResponse(req, Http404, %*{"errcode": "M_NOT_FOUND", "error": "Unknown endpoint"})
 
-proc runForever*(server: AppserviceServer) {.async.} =
+proc runForever*(server: AppserviceServer): Future[void] {.async.} =
   let httpServer = newAsyncHttpServer()
   info(fmt"Appservice listening on {server.cfg.appservice.hostname}:{server.cfg.appservice.port}")
   let cbRaw = proc(req: Request): Future[void] {.async.} =
@@ -240,3 +297,5 @@ proc newAppserviceServer*(cfg: Config, reg: Registration): AppserviceServer =
     lastTransactionId: "",
     seenTransactions: initHashSet[string]()
   )
+
+{.pop.}
