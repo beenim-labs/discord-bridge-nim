@@ -6,3 +6,5 @@ tests/fixtures/provisioning-runtime-1770765127-1770765127.db-shm
 tests/fixtures/provisioning*
 tests/test_provisioning
 mautrix-discord
+tests/.DS_Store
+tests/fixtures/*.db
